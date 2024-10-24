@@ -1,0 +1,6 @@
+#phen_data = phen_data.set_index(['Stations_id', 'Referenzjahr', 'Eintrittsdatum'])
+#print(phen_data.head())
+#print(phen_data[phen_data['Stations_id'] == 7521])
+#print(phen_data.loc[(slice(None), 2021, slice(None)), :])
+#print(phen_data.index)
+#phen_data = phen_data.sort_index()
