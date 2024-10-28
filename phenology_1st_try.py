@@ -26,7 +26,7 @@ phen_data_maize = dataset_fctns.order_phen_dataset(phen_data_maize)
 phen_data_wheat = dataset_fctns.add_locations(phen_data_wheat, station_data)
 phen_data_wheat = dataset_fctns.phase_order_name(phen_data_wheat, phase_names, [10, 12, 15, 18, 19, 21, 22, 23, 24, ])
 phen_data_wheat = dataset_fctns.order_phen_dataset(phen_data_wheat)
-print(phen_data_wheat.head(30))
+print(phen_data_wheat['Name of phase'])
 #phen_data = dataset_fctns.time_to_next_stage(phen_data)
 #print(phen_data.isnull().sum())
 ## COUNT NUMBER AND AVERAGE LENGTH GOING FROM ONE PHASE TO ANOTHER ##
