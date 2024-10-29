@@ -1,0 +1,12 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"name": "phenology_dwd",
+			"path": "."
+		}
+	],
+	"settings": {}
+}
