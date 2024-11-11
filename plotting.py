@@ -67,7 +67,7 @@ def plot_stage_to_stage(phen_data, stage1, stage2, winter_sowing = False, font_s
     ## Subtract and hopefully throw up a NaN where one or both are missing
     intervals = dataset_fctns.time_stage_to_stage(phen_data, stage1, stage2, winter_sowing=winter_sowing)
     fig, ax = plt.subplots(figsize = (10, 5))
-    ax.hist(intervals.dropna(), bins = 150)
+    ax.hist(intervals.dropna(), bins = 250)
     ax.set_title(f'Length of time from {stage1}\nto {stage2}', fontsize = font_size)
     ax.set_ylabel('Number of observations', fontsize = font_size)
     ax.set_xlabel(f'Length of time from {stage1}\nto {stage2}', fontsize = font_size)
