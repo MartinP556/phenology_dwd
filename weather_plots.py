@@ -33,7 +33,10 @@ def plot_averages(dataset, variable, save_name, font_size = 18):
     ax.set_title(variable + ' daily means and standard deviations over period')
     plt.savefig('C:\\Users\\wlwc1989\\Documents\\Phenology_Test_Notebooks\\phenology_dwd\\plots\\' + save_name)
 
-ds = xr.open_dataset('https://opendata.dwd.de/climate_environment/CDC/grids_germany/daily/hyras_de/air_temperature_max/tasmax_hyras_5_1951_2020_v5-0_de.nc#mode=bytes', chunks={"time": 2}).thin({"time": 20 , "x": 20, "y": 20})#, chunks={"time": 3, "x": 5, "y": 5}, "x": 5, "y": 5
+#ds = xr.open_dataset('https://opendata.dwd.de/climate_environment/CDC/grids_germany/daily/hyras_de/air_temperature_max/tasmax_hyras_5_1951_2020_v5-0_de.nc#mode=bytes', chunks={"time": 2}).thin({"time": 20 , "x": 20, "y": 20})#, chunks={"time": 3, "x": 5, "y": 5}, "x": 5, "y": 5
 
+ds = xr.open_dataset('https://opendata.dwd.de/climate_environment/CDC/grids_germany/daily/hyras_de/air_temperature_max/tasmax_hyras_5_1951_2020_v5-0_de.nc#mode=bytes', chunks={"time": 1, "x": 20, "y": 20})
+means = ds.groupby('time.dayofyear').mean(dim=['time', 'x', 'y'])['tasmax']
+means.to_netcdf('C:\\Users\\wlwc1989\\Documents\\Phenology_Test_Notebooks\\phenology_dwd\\Saved_files\\mean_temps2.nc')
 #print('dataset opened')
 #plot_averages(ds, 'tasmax', 'maxes_time_series.png')
