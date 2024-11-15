@@ -1,6 +1,16 @@
 import numpy as np
 import pandas as pd
 
+class Phenology_set:
+    def __init__(self, address):
+        self.phen_data = pd.read_csv(address, encoding = "latin1", engine='python', sep = r';\s+|;\t+|;\s+\t+|;\t+\s+|;|\s+;|\t+;|\s+\t+;|\t+\s+;')
+        self.phen_data['Eintrittsdatum'] = pd.to_datetime(self.phen_data['Eintrittsdatum'], format = '%Y%m%d')
+    def drop_columns():
+        for drop_name in drop_list:
+            self.phen_data = self.phen_data.drop(drop_name, axis = 1)
+    
+
+
 def read_phen_dataset(adress, drop_list = []):
     phen_data = pd.read_csv(adress, encoding = "latin1", engine='python', sep = r';\s+|;\t+|;\s+\t+|;\t+\s+|;|\s+;|\t+;|\s+\t+;|\t+\s+;')
     for drop_name in drop_list:
