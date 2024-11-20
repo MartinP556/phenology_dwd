@@ -14,14 +14,17 @@ def count_transition_numbers(phen_data):
                 print('Number going from ', phase_name, ' to ', next_phase, ': ', len(obs_this_change))
                 print('Average time going from ', phase_name, ' to ', next_phase, ': ', obs_this_change['Time to next stage'].mean())
 
-def scatter_plot_Germany(lats, lons,  plot_colors = 'r', title = 'Stations', font_size = 20, save_name='mistake_plot', colorbar = True):
+def Germany_plot():
     adm1_shapes = list(shpreader.Reader('gadm41_DEU_1/gadm41_DEU_1.shp').geometries())
     fig,ax=plt.subplots(figsize=(10,10), subplot_kw={'projection': ccrs.PlateCarree()})
     ax.coastlines(resolution='10m')
     ax.add_geometries(adm1_shapes, ccrs.PlateCarree(), edgecolor='black', facecolor='none', alpha=1)
     ax.set_extent([5, 16, 47, 56], ccrs.PlateCarree())
-    ax.set_title(title, fontsize = font_size)
-    
+    return fig, ax
+
+def scatter_plot_Germany(lats, lons,  plot_colors = 'r', title = 'Stations', font_size = 20, save_name='mistake_plot', colorbar = True):
+    adm1_shapes = list(shpreader.Reader('gadm41_DEU_1/gadm41_DEU_1.shp').geometries())
+    fig,ax=Germany_plot()
     if colorbar:
         plot_Germany = ax.scatter(lons, lats, s = 20, c = plot_colors, cmap = 'Purples')
         cbar = fig.colorbar(plot_Germany, shrink = 0.5)
@@ -30,6 +33,14 @@ def scatter_plot_Germany(lats, lons,  plot_colors = 'r', title = 'Stations', fon
     else:
         plot_Germany = ax.scatter(lons, lats, s = 20, c = plot_colors, cmap = 'Purples')
     fig.savefig('plots/' + save_name + '.png')
+
+def heatmap_Germany(lats, lons, Zs, title = 'Stations', font_size = 20, save_name='mistake_plot', colorbar = True):
+    adm1_shapes = list(shpreader.Reader('gadm41_DEU_1/gadm41_DEU_1.shp').geometries())
+    fig,ax=plt.subplots(figsize=(10,10), subplot_kw={'projection': ccrs.PlateCarree()})
+    ax.coastlines(resolution='10m')
+    ax.add_geometries(adm1_shapes, ccrs.PlateCarree(), edgecolor='black', facecolor='none', alpha=1)
+    ax.set_extent([5, 16, 47, 56], ccrs.PlateCarree())
+    ax.set_title(title, fontsize = font_size)
 
 def plot_station_locations(phen_data, station_data, font_size = 20):
     phen_data = dataset_fctns.add_locations(phen_data, station_data)
@@ -99,5 +110,56 @@ def length_phase_box_plot(phen_data, phase_names, font_size = 20):
     ax.set_ylabel('Length of phase (days)', fontsize = font_size)
     fig.savefig('plots/length_phase_box_plot.png', bbox_inches='tight')
 
+def hist2d_locations(lats, lons, bin_num=20, font_size = 20):
+    hist, lonedges, latedges = np.histogram2d(lons, lats, bins=bin_num)#, range=[[0, 4], [0, 4]])
+    sizelat = (latedges[1] - latedges[0])/2
+    sizelon = (lonedges[1] - lonedges[0])/2
+    lonpos, latpos = np.meshgrid(lonedges, latedges, indexing="ij")#np.meshgrid(lonedges[:-1] + sizelon, latedges[:-1] + sizelat, indexing="ij")
+    lonpos = lonpos#.ravel()
+    latpos = latpos#.ravel()
+    fig, ax = Germany_plot()
+    ax.set_title('Frequency of observations of ripeness time by location', fontsize = font_size)
+    densities = ax.pcolormesh(lonpos, latpos, hist, cmap='Purples')
+    cbar = plt.colorbar(densities, fraction = 0.03)
+    cbar.set_label(label = 'Number of reports in 2007', size=font_size)
+    cbar.ax.tick_params(labelsize=font_size - 2) 
+    plt.show()
 
+def plot_obs_per_year(ds_obs, save_name, phase_list = [], font_size = 20):
+    fig, ax = plt.subplots(figsize = (10, 5))
+    yearly_counts = ds_obs.groupby('Referenzjahr').count()
+    yearly_counts = Maize_set.ds_observed.groupby('Referenzjahr').count()
+    yearly_counts.index = pd.to_datetime(yearly_counts.index, format='%Y')#.resample('str') #np.datetime64(yearly_counts.index, 'Y')
+    yearly_counts = yearly_counts.resample('YS').asfreq()
+    if len(phase_list) != 0:
+        for phase_index, phase in enumerate(phase_list):
+            ax.plot(yearly_counts.index, yearly_counts[yearly_counts.columns[phase_index]], color = f'C{phase_index}', label = phase)
+    ax.set_xlabel('Year', fontsize = font_size)
+    ax.set_ylabel('Number of observations', fontsize = font_size)
+    fig.suptitle('Number of observations of phase by year', fontsize = font_size)
+    ax.legend(fontsize = font_size - 2, bbox_to_anchor=(0.7, -0.2))
+    fig.savefig(f'C:\\Users\\wlwc1989\\Documents\\Phenology_Test_Notebooks\\phenology_dwd\\plots\\{save_name}.png')
 
+def box_plot_modelled_observed(ds, phases, font_size = 20):
+    for phase in phases:
+        fig, ax = plt.subplots(figsize = (10, 10))
+        ax.boxplot([ds[f'modelled time emergence to {phase}'].dropna(), ds[f'ML prediction emergence to {phase}'].dropna(), ds[f'observed time emergence to {phase}'].dropna()], 
+                   tick_labels=[f'modelled time emergence to\n{phase}', f'ML prediction emergence to\n{phase}', f'observed time emergence to\n{phase}'], 
+                   widths = 0.5, showfliers=False) #positions = [obs_this_phase['Stations_id'].unique()[0]],
+        #ax.set_ylim(0, 100)
+        plt.xticks(rotation = 90)
+        ax.tick_params(labelsize = font_size)
+        ax.set_title(f'Modelled and observed times to {phase}', fontsize = font_size)
+        ax.set_ylabel('Time (days)', fontsize = font_size)
+        fig.savefig(f'plots/ML_modelled_observed_{phase}.png', bbox_inches='tight')
+
+        #fig, ax = plt.subplots(figsize = (10, 10))
+        #ax.boxplot((ds[f'modelled time emergence to {phase}']- ds[f'observed time emergence to {phase}']).dropna(), 
+        #           tick_labels=[f'diff modelled/observed time emergence\nto{phase}'], 
+        #           widths = 0.5, showfliers=False) #positions = [obs_this_phase['Stations_id'].unique()[0]],
+        #ax.set_ylim(0, 100)
+        #plt.xticks(rotation = 90)
+        #ax.tick_params(labelsize = font_size)
+        #ax.set_title(f'Difference between modelled\nand observed times to {phase}', fontsize = font_size)
+        #ax.set_ylabel('Time (days)', fontsize = font_size)
+        #fig.savefig(f'plots/modelled_observed_{phase}_diffs.png', bbox_inches='tight')
