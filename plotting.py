@@ -128,7 +128,7 @@ def hist2d_locations(lats, lons, bin_num=20, font_size = 20):
 def plot_obs_per_year(ds_obs, save_name, phase_list = [], font_size = 20):
     fig, ax = plt.subplots(figsize = (10, 5))
     yearly_counts = ds_obs.groupby('Referenzjahr').count()
-    yearly_counts = Maize_set.ds_observed.groupby('Referenzjahr').count()
+    yearly_counts = ds_obs.groupby('Referenzjahr').count()
     yearly_counts.index = pd.to_datetime(yearly_counts.index, format='%Y')#.resample('str') #np.datetime64(yearly_counts.index, 'Y')
     yearly_counts = yearly_counts.resample('YS').asfreq()
     if len(phase_list) != 0:
