@@ -1,15 +1,7 @@
 import numpy as np
 import pandas as pd
-
-class Phenology_set:
-    def __init__(self, address):
-        self.phen_data = pd.read_csv(address, encoding = "latin1", engine='python', sep = r';\s+|;\t+|;\s+\t+|;\t+\s+|;|\s+;|\t+;|\s+\t+;|\t+\s+;')
-        self.phen_data['Eintrittsdatum'] = pd.to_datetime(self.phen_data['Eintrittsdatum'], format = '%Y%m%d')
-    def drop_columns():
-        for drop_name in drop_list:
-            self.phen_data = self.phen_data.drop(drop_name, axis = 1)
-    
-
+import xarray as xr
+import cartopy.crs as ccrs
 
 def read_phen_dataset(adress, drop_list = []):
     phen_data = pd.read_csv(adress, encoding = "latin1", engine='python', sep = r';\s+|;\t+|;\s+\t+|;\t+\s+|;|\s+;|\t+;|\s+\t+;|\t+\s+;')
@@ -41,7 +33,11 @@ def get_station_locations(dataset, ds_stations):
     ds_stations.index = ds_stations['Stations_id']
     lat = [ds_stations._get_value(row, col) for row, col in zip(dataset['Stations_id'], ['geograph.Breite' for count in range(len(dataset))])] #station_data.lookup(row_labels = dataset['Stations_id'], col_labels = ['geograph.Breite'])
     lon = [ds_stations._get_value(row, col) for row, col in zip(dataset['Stations_id'], ['geograph.Laenge' for count in range(len(dataset))])] #station_data._lookup(dataset['Stations_id'], ['geograph.Laenge'])
-    return lat, lon
+    dataset['lat'] = lat
+    dataset['lon'] = lon
+    dataset['lat'] = dataset['lat'].map(lambda x: x[0] if isinstance(x, np.float64) == False else x)
+    dataset['lon'] = dataset['lon'].map(lambda x: x[0] if isinstance(x, np.float64) == False else x)
+    return dataset
 
 def add_locations(dataset, ds_stations):
     LAT, LON = get_station_locations(dataset, ds_stations)
@@ -68,8 +64,24 @@ def time_stage_to_stage(phen_data, stage1, stage2, winter_sowing = False):
     stage1_frame = isolate_stage(phen_data, stage1)
     if winter_sowing: #If the first stage is actually in winter of the previous year, compare the first stage to the year after.
         stage1_frame.loc[:, 'Referenzjahr'] = stage1_frame.loc[:, 'Referenzjahr'] + 1
-    stage1_frame.set_index(['Stations_id', 'Referenzjahr'], inplace=True)
+    stage1_frame.set_index(['Referenzjahr', 'Stations_id'], inplace=True)
     stage2_frame = isolate_stage(phen_data, stage2)
-    stage2_frame.set_index(['Stations_id', 'Referenzjahr'], inplace=True)
+    stage2_frame.set_index(['Referenzjahr', 'Stations_id'], inplace=True)
     print()
     return (stage2_frame['Eintrittsdatum'] - stage1_frame['Eintrittsdatum'])/ pd.to_timedelta(1, unit='D') #.astype(np.float64)
+
+def interpolate_xy(x, y, ds):
+    #Interpolates the input array onto the (non-gridded e.g. phenology station) coordinates x and y.
+    #Note hyras is not stored on the full grid, but on some kind of subset. Not quite sure how this works. Just got to hope the stations are in a hyras gridpoint.
+    X_for_interp = xr.DataArray(x, dims="modelpoint")
+    Y_for_interp = xr.DataArray(y, dims="modelpoint")
+    return ds.interp(x=X_for_interp, y=Y_for_interp)#, kwargs={"fill_value": None})
+
+def latlon_to_projection(x_coords, y_coords):
+    proj_epsg = ccrs.epsg(3034)
+    proj_latlon = ccrs.PlateCarree()
+    points_epsg = proj_epsg.transform_points(proj_latlon, x_coords, y_coords)
+    x_epsg = points_epsg[:, 0]
+    y_epsg = points_epsg[:, 1]
+    return x_epsg, y_epsg
+
