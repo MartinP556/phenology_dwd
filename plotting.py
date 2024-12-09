@@ -163,3 +163,21 @@ def box_plot_modelled_observed(ds, phases, font_size = 20):
         #ax.set_title(f'Difference between modelled\nand observed times to {phase}', fontsize = font_size)
         #ax.set_ylabel('Time (days)', fontsize = font_size)
         #fig.savefig(f'plots/modelled_observed_{phase}_diffs.png', bbox_inches='tight')
+
+
+def plot_error_distn(ds, phases, training_means, font_size = 20):
+    for phase_index, phase in enumerate(phases):
+        fig, ax = plt.subplots(figsize = (10, 7))
+        print(training_means[phase_index])
+        residuals_to_average = training_means[phase_index] - ds[f'observed time emergence to {phase}']
+        ML_residuals = ds[f'ML prediction emergence to {phase}'] - ds[f'observed time emergence to {phase}']
+        model_residuals = ds[f'modelled time emergence to {phase}'] - ds[f'observed time emergence to {phase}']
+        ax.boxplot([model_residuals.dropna(), ML_residuals.dropna(), residuals_to_average.dropna()],
+                   tick_labels=[f'residuals modelled\ntime', f'residuals ML\nprediction', f'obs - training mean'], #tick_labels=[f'residuals modelled time emergence\nto {phase}', f'residuals ML prediction emergence\nto {phase}', f'residuals compared to training mean\n{phase}'],
+                   widths = 0.5, showfliers=False) #positions = [obs_this_phase['Stations_id'].unique()[0]],
+        #ax.set_ylim(0, 100)
+        plt.xticks(rotation = 50)
+        ax.tick_params(labelsize = font_size)
+        ax.set_title(f'ML and model residuals,\ntime to {phase}', fontsize = font_size)
+        ax.set_ylabel('Time (days)', fontsize = font_size)
+        fig.savefig(f'plots/ML_modelled_observed_{phase}.png', bbox_inches='tight')
