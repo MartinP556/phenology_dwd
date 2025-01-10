@@ -77,7 +77,7 @@ class Phenology_set:
         ## Puts pandas phenological frame into driver xarray and aligns the two
         just_emergence_phen_data = self.phen_data.where(self.phen_data['Name of phase'] == 'beginning of emergence').dropna()
         ## For now just do data after 2005 to save time
-        just_emergence_phen_data = just_emergence_phen_data.where(just_emergence_phen_data['Eintrittsdatum'] > np.datetime64('2005-01-01')).dropna()
+        just_emergence_phen_data = just_emergence_phen_data.where(just_emergence_phen_data['Eintrittsdatum'] > np.datetime64('1991-01-01')).dropna()
         x_coords = just_emergence_phen_data['lon'].values
         y_coords = just_emergence_phen_data['lat'].values
         #Makes an array to put into GDD model
@@ -190,7 +190,7 @@ class Phenology_set:
         self.verification_stationid = self.GDD_driver_data['Stations_id'].values[self.complement_of_subsample]
     
     def decision_tree(self, md=20):
-        self.regr = tree.DecisionTreeRegressor(max_depth=md)
+        self.regr = tree.DecisionTreeRegressor(max_depth=md, min_samples_leaf=5)
         self.fit = self.regr.fit(self.training_X, self.training_y)
         data_ML_training = {'Stations_id': np.int64(self.GDD_driver_data['Stations_id'].values[self.subsample]),
                         'Referenzjahr': np.int64(self.GDD_driver_data['Referenzjahr'].values[self.subsample]),
