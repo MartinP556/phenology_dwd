@@ -3,10 +3,13 @@
 #SBATCH --job-name=myRarray
 #SBATCH -o %A_%a.out
 #SBATCH -e %A_%a.err
-#SBATCH --time=5:00
-#SBATCH --array=1-3
+#SBATCH --time=30:00
+#SBATCH --array=1-20
 
-stepsize=2
-
-source environments/EE_venv/bin/activate
-python -s satdata$(${SLURM_ARRAY_TASK_ID}*$stepsize) -start $(${SLURM_ARRAY_TASK_ID}*$stepsize) -end $($(${SLURM_ARRAY_TASK_ID}*$stepsize) + $stepsize)
+stepsize=50
+module load jaspy
+source ../environments/EE_venv/bin/activate
+which python
+echo $((${SLURM_ARRAY_TASK_ID}*$stepsize))
+echo $(($((${SLURM_ARRAY_TASK_ID}*$stepsize))+$stepsize))
+python EE_download_timeseries.py -s satdata$((${SLURM_ARRAY_TASK_ID}*$stepsize)) -start $((${SLURM_ARRAY_TASK_ID}*$stepsize)) -end $(($((${SLURM_ARRAY_TASK_ID}*$stepsize))+$stepsize))

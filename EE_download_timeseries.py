@@ -17,7 +17,7 @@ def satellite_data_at_coords(coords, start_date = '2000-01-01', end_date = '2022
         dataset = {'Time': timelist,
                    'lat': [coord[0] for count in range(len(timelist))],
                    'lon': [coord[1] for count in range(len(timelist))],
-                   'Stations_Id': [coord[2] for count in range(len(timelist))]
+                   'Stations_Id': [np.int64(coord[2]) for count in range(len(timelist))]
                    }
         for band in bands:
             dataset[f'Median {band}'] = [band_data[band] for band_data in bandlist]
