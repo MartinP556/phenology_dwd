@@ -4,12 +4,9 @@
 #SBATCH -o %A_%a.out
 #SBATCH -e %A_%a.err
 #SBATCH --time=30:00
-#SBATCH --array=1-20
+#SBATCH --array=0-49
 
-stepsize=50
+stepsize=100
 module load jaspy
 source ../environments/EE_venv/bin/activate
-which python
-echo $((${SLURM_ARRAY_TASK_ID}*$stepsize))
-echo $(($((${SLURM_ARRAY_TASK_ID}*$stepsize))+$stepsize))
 python EE_download_timeseries.py -s satdata$((${SLURM_ARRAY_TASK_ID}*$stepsize)) -start $((${SLURM_ARRAY_TASK_ID}*$stepsize)) -end $(($((${SLURM_ARRAY_TASK_ID}*$stepsize))+$stepsize))

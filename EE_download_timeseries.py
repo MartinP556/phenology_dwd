@@ -5,11 +5,47 @@ import pandas as pd
 import argparse
 import argument_names
 
+def mask_s2_clouds(image):
+    """Masks clouds in a Sentinel-2 image using the QA band.
+
+    Args:
+        image (ee.Image): A Sentinel-2 image.
+
+    Returns:
+        ee.Image: A cloud-masked Sentinel-2 image.
+    """
+    qa = image.select('QA60')
+
+    # Bits 10 and 11 are clouds and cirrus, respectively.
+    cloud_bit_mask = 1 << 10
+    cirrus_bit_mask = 1 << 11
+
+    # Both flags should be set to zero, indicating clear conditions.
+    mask = (
+        qa.bitwiseAnd(cloud_bit_mask)
+        .eq(0)
+        .And(qa.bitwiseAnd(cirrus_bit_mask).eq(0))
+    )
+
+    return image.updateMask(mask)
+
+def mask_s2_clouds_collection(image_collection):
+    """Masks clouds in a Sentinel-2 image collection using the SLC band.
+
+    Args:
+        image (ee.ImageCollection): A Sentinel-2 image collection.
+
+    Returns:
+        ee.Image: A cloud-masked Sentinel-2 image collection.
+    """
+    return image_collection.map(mask_s2_clouds)
+
 def satellite_data_at_coords(coords, start_date = '2000-01-01', end_date = '2022-12-31', instrument = "COPERNICUS/S2_SR_HARMONIZED", bands = ['B4', 'B8'], box_width = 0.002, pixel_scale = 500):
     for coord_index, coord in enumerate(coords):
         print(coord_index)
         location = ee.Geometry.BBox(coord[1] - box_width, coord[0] - box_width, coord[1] + box_width, coord[0] + box_width) #ee.Geometry.Point(coord[:2])#
         dataset = ee.ImageCollection(instrument)
+        dataset = mask_s2_clouds_collection(dataset)
         filtered_dataset = dataset.filterDate(start_date, end_date).filterBounds(location)
         time_series_data = filtered_dataset.select(*bands).map(lambda img: img.set('mean', img.reduceRegion(ee.Reducer.median(), location , pixel_scale)))#.getInfo()#.getRegion(location, pixel_scale).getInfo()#.getRegion(location, 30).getInfo()#('B4')#.median()#.get('B4')#reduceColumns(ee.Reducer.median().setOutputs(['median']), [''])#.get('B4')
         timelist = time_series_data.aggregate_array('system:time_start').getInfo()
