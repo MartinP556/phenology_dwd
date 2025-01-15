@@ -1,0 +1,12 @@
+#!/bin/bash 
+#SBATCH --partition=short-serial 
+#SBATCH --job-name=myRarray
+#SBATCH -o %A_%a.out
+#SBATCH -e %A_%a.err
+#SBATCH --time=60:00
+#SBATCH --array=0-25
+
+stepsize=100
+module load jaspy
+source ../environments/EE_venv/bin/activate
+python EE_download_timeseries.py -s MODIS/satdata$((${SLURM_ARRAY_TASK_ID}*$stepsize)) -start $((${SLURM_ARRAY_TASK_ID}*$stepsize)) -end $(($((${SLURM_ARRAY_TASK_ID}*$stepsize))+$stepsize))
