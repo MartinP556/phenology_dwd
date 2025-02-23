@@ -78,8 +78,8 @@ def interpolate_xy(x, y, ds):
     Y_for_interp = xr.DataArray(y, dims="modelpoint")
     return ds.interp(x=X_for_interp, y=Y_for_interp)#, kwargs={"fill_value": None})
 
-def latlon_to_projection(x_coords, y_coords):
-    proj_epsg = ccrs.epsg(3034)
+def latlon_to_projection(x_coords, y_coords, epsg_num = 3034):
+    proj_epsg = ccrs.epsg(epsg_num)
     proj_latlon = ccrs.PlateCarree()
     points_epsg = proj_epsg.transform_points(proj_latlon, x_coords, y_coords)
     x_epsg = points_epsg[:, 0]
