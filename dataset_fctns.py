@@ -104,9 +104,9 @@ def WC_EOS(lon, lat):
     return data[y, x]
 
 def add_SOS_to_df(df):
-    df['SOS'] = WC_SOS(df['lon'], df['lat'])
+    df.loc[:, 'SOS'] = WC_SOS(df['lon'], df['lat'])
     return df
 def add_EOS_to_df(df):
-    df['EOS'] = WC_EOS(df['lon'], df['lat'])
+    df.loc[:, 'EOS'] = WC_EOS(df['lon'], df['lat'])
     return df
 
