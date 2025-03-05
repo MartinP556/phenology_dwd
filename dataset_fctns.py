@@ -71,12 +71,15 @@ def time_stage_to_stage(phen_data, stage1, stage2, winter_sowing = False):
     print()
     return (stage2_frame['Eintrittsdatum'] - stage1_frame['Eintrittsdatum'])/ pd.to_timedelta(1, unit='D') #.astype(np.float64)
 
-def interpolate_xy(x, y, ds):
+def interpolate_xy(x, y, ds, xy=True):
     #Interpolates the input array onto the (non-gridded e.g. phenology station) coordinates x and y.
     #Note hyras is not stored on the full grid, but on some kind of subset. Not quite sure how this works. Just got to hope the stations are in a hyras gridpoint.
     X_for_interp = xr.DataArray(x, dims="modelpoint")
     Y_for_interp = xr.DataArray(y, dims="modelpoint")
-    return ds.interp(x=X_for_interp, y=Y_for_interp)#, kwargs={"fill_value": None})
+    if xy:
+        return ds.interp(x=X_for_interp, y=Y_for_interp)#, kwargs={"fill_value": None})
+    else:
+        return ds.interp(lon=X_for_interp, lat=Y_for_interp)
 
 def latlon_to_projection(x_coords, y_coords, epsg_num = 3034):
     proj_epsg = ccrs.epsg(epsg_num)
