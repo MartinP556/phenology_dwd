@@ -22,6 +22,14 @@ def Germany_plot():
     ax.set_extent([5, 16, 47, 56], ccrs.PlateCarree())
     return fig, ax
 
+def Kenya_plot():
+    adm1_shapes = list(shpreader.Reader('gadm41_KEN_1/gadm41_KEN_1.shp').geometries())
+    fig,ax=plt.subplots(figsize=(10,10), subplot_kw={'projection': ccrs.PlateCarree()})
+    ax.coastlines(resolution='10m')
+    ax.add_geometries(adm1_shapes, ccrs.PlateCarree(), edgecolor='black', facecolor='none', alpha=1)
+    ax.set_extent([30, 40, -5, 5], ccrs.PlateCarree())
+    return fig, ax
+
 def scatter_plot_Germany(lats, lons,  plot_colors = 'r', title = 'Stations', font_size = 20, save_name='mistake_plot', colorbar = True):
     adm1_shapes = list(shpreader.Reader('gadm41_DEU_1/gadm41_DEU_1.shp').geometries())
     fig,ax=Germany_plot()
@@ -110,14 +118,17 @@ def length_phase_box_plot(phen_data, phase_names, font_size = 20):
     ax.set_ylabel('Length of phase (days)', fontsize = font_size)
     fig.savefig('plots/length_phase_box_plot.png', bbox_inches='tight')
 
-def hist2d_locations(lats, lons, bin_num=20, font_size = 20):
+def hist2d_locations(lats, lons, bin_num=20, font_size = 20, country = 'DE'):
     hist, lonedges, latedges = np.histogram2d(lons, lats, bins=bin_num)#, range=[[0, 4], [0, 4]])
     sizelat = (latedges[1] - latedges[0])/2
     sizelon = (lonedges[1] - lonedges[0])/2
     lonpos, latpos = np.meshgrid(lonedges, latedges, indexing="ij")#np.meshgrid(lonedges[:-1] + sizelon, latedges[:-1] + sizelat, indexing="ij")
     lonpos = lonpos#.ravel()
     latpos = latpos#.ravel()
-    fig, ax = Germany_plot()
+    if country == 'DE':
+        fig, ax = Germany_plot()
+    elif country == 'KEN':
+        fig, ax = Kenya_plot()
     ax.set_title('Frequency of observations of ripeness time by location', fontsize = font_size)
     densities = ax.pcolormesh(lonpos, latpos, hist, cmap='Purples')
     cbar = plt.colorbar(densities, fraction = 0.03)
