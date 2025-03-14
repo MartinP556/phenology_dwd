@@ -21,4 +21,36 @@ def Trapezoid_Temp_response(T, T_min, T_opt1, T_opt2, T_max):
     pre_opt = (T>=T_min)*(T<=T_opt1)
     opt = (T>=T_opt1)*(T<=T_opt2)
     post_opt = (T>=T_opt2)*(T<=T_max)
-    return pre_opt*(T - T_min)/(T_opt1 - T_min) + opt + post_opt*(T_max - T)/(T_max - T_opt2)
+    return pre_opt*(T - T_min)/(T_opt1 - T_min) + opt + post_opt*(T_max - T)/(T_max - T_opt2) 
+
+def Trapezoid_Temp_derivs(T, T_min, T_opt1, T_opt2, T_max):
+    pre_opt = (T>=T_min)*(T<=T_opt1)*np.array([(T - T_min)/(T_opt1 - T_min),
+                                               (T - T_opt1)/((T_opt1 - T_min)**2),
+                                               (T_min - T)/((T_opt1 - T_min)**2),
+                                               np.zeros(T.shape),
+                                               np.zeros(T.shape)])
+    opt = (T>=T_opt1)*(T<=T_opt2)*np.array([np.ones(T.shape),
+                                            np.zeros(T.shape),
+                                            np.zeros(T.shape),
+                                            np.zeros(T.shape),
+                                            np.zeros(T.shape)])
+    post_opt = (T>=T_opt2)*(T<=T_max)*np.array([(T - T_min)/(T_opt1 - T_min),
+                                               (T - T_opt1)/((T_opt1 - T_min)**2),
+                                               (T_min - T)/((T_opt1 - T_min)**2),
+                                               np.zeros(T.shape),
+                                               np.zeros(T.shape)])
+    if pre_opt:
+        d_dScale = (T - T_min)/(T_opt1 - T_min)
+        d_dTmin = (T - T_opt1)/((T_opt1 - T_min)**2)
+        d_dTopt1 = (T_min - T)/((T_opt1 - T_min)**2)
+        d_dTopt2 = np.zeros(T.shape)
+        d_dTmax = np.zeros(T.shape)
+    elif opt:
+        return []
+    elif post_opt:
+        d_dScale = (T_max - T)/(T_max - T_opt2) 
+        d_dTmin = np.zeros(T.shape)
+        d_dTopt1 = np.zeros(T.shape)
+        d_dTopt2 = (T_max - T)/((T_max - T_opt2)**2)
+        d_dTmax = (T - T_opt2)/((T_max - T_opt2)**2)
+    return pre_opt + opt + post_opt
