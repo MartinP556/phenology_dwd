@@ -13,7 +13,7 @@ def phase_dependent_response(driver_values, t_dev, responses, thresholds):
 
 def Wang_Engel_Temp_response(T, T_min, T_opt, T_max, beta = 1):
     alpha = np.log(2)/np.log( (T_max - T_min)/(T_opt - T_min) )
-    f_T = ( ( (2*(T - T_min)**alpha)*((T_opt - T_min)**alpha) - ((T - T_min)**(2*alpha)) ) / ((T_opt - T_min)**(2*alpha)) )**beta
+    f_T = ( ( (2*(np.sign(T - T_min)*(T - T_min))**alpha)*((T_opt - T_min)**alpha) - ((np.sign(T - T_min)*(T - T_min))**(2*alpha)) ) / ((T_opt - T_min)**(2*alpha)) )**beta
     f_T = np.nan_to_num(f_T)
     return f_T*(T >= T_min)*(T<= T_max)
 
