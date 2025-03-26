@@ -30,14 +30,15 @@ def time_to_next_stage(phen_data):
 def get_phase_name(phaseid, ds_phase_names):
     return ds_phase_names['Phase_englisch'][ds_phase_names['Phase_ID'] == str(phaseid)].values[0]
 
-def get_station_locations(dataset, ds_stations):
+def get_station_locations(dataset, ds_stations, check_lists = True):
     ds_stations.index = ds_stations['Stations_id']
     lat = [ds_stations._get_value(row, col) for row, col in zip(dataset['Stations_id'], ['geograph.Breite' for count in range(len(dataset))])] #station_data.lookup(row_labels = dataset['Stations_id'], col_labels = ['geograph.Breite'])
     lon = [ds_stations._get_value(row, col) for row, col in zip(dataset['Stations_id'], ['geograph.Laenge' for count in range(len(dataset))])] #station_data._lookup(dataset['Stations_id'], ['geograph.Laenge'])
     dataset['lat'] = lat
     dataset['lon'] = lon
-    dataset['lat'] = dataset['lat'].map(lambda x: x[0] if isinstance(x, np.float64) == False else x)
-    dataset['lon'] = dataset['lon'].map(lambda x: x[0] if isinstance(x, np.float64) == False else x)
+    if check_lists:
+        dataset['lat'] = dataset['lat'].map(lambda x: x[0] if isinstance(x, np.float64) == False else x)
+        dataset['lon'] = dataset['lon'].map(lambda x: x[0] if isinstance(x, np.float64) == False else x)
     return dataset
 
 def add_locations(dataset, ds_stations):
