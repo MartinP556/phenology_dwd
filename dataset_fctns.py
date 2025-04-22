@@ -4,6 +4,11 @@ import xarray as xr
 import cartopy.crs as ccrs
 from PIL import Image
 
+def columns_to_datetime(ds, columns):
+    for colname in columns:
+        ds[colname] = pd.to_datetime(ds[colname], format='mixed')
+    return ds
+
 def read_phen_dataset(adress, drop_list = []):
     phen_data = pd.read_csv(adress, encoding = "latin1", engine='python', sep = r';\s+|;\t+|;\s+\t+|;\t+\s+|;|\s+;|\t+;|\s+\t+;|\t+\s+;')
     for drop_name in drop_list:
@@ -39,6 +44,16 @@ def get_station_locations(dataset, ds_stations, check_lists = True):
     if check_lists:
         dataset['lat'] = dataset['lat'].map(lambda x: x[0] if isinstance(x, np.float64) == False else x)
         dataset['lon'] = dataset['lon'].map(lambda x: x[0] if isinstance(x, np.float64) == False else x)
+    return dataset
+
+def get_station_locations_CIMMYT(dataset, ds_stations):
+    ds_stations.index = ds_stations['LocationID']
+    lat = [ds_stations._get_value(row, col) for row, col in zip(dataset['sitecode'], ['Latitude' for count in range(len(dataset))])] #station_data.lookup(row_labels = dataset['Stations_id'], col_labels = ['geograph.Breite'])
+    lon = [ds_stations._get_value(row, col) for row, col in zip(dataset['sitecode'], ['Longitude' for count in range(len(dataset))])] #station_data._lookup(dataset['Stations_id'], ['geograph.Laenge'])
+    dataset['lat'] = lat
+    dataset['lon'] = lon
+    dataset['lat'] = dataset['lat'].map(lambda x: x[0] if isinstance(x, float) == False else x)
+    dataset['lon'] = dataset['lon'].map(lambda x: x[0] if isinstance(x, float) == False else x)
     return dataset
 
 def add_locations(dataset, ds_stations):
