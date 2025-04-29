@@ -4,6 +4,26 @@ import xarray as xr
 import cartopy.crs as ccrs
 from PIL import Image
 
+def WC_date_from_columns(ds, phase):
+    ds.loc[:, 'WC SOS date'] = pd.to_datetime(ds.loc[:, 'yrcode'], format = '%Y') + pd.to_timedelta(ds['SOS'], 'D')
+    wrong_year = ((ds[f'observed time to {phase}'] - ds['WC SOS date']).dt.days < 0)
+    ds.loc[wrong_year, 'WC SOS date'] = pd.to_datetime(ds.loc[:, 'yrcode'] - 1, format = '%Y') + pd.to_timedelta(ds['SOS'], 'D')
+    out_of_season = ((ds[f'observed time to {phase}'] - ds['WC SOS date']).dt.days > 200) & (ds['SOS2'] > 0)
+    ds.loc[out_of_season, 'WC SOS date'] = pd.to_datetime(ds.loc[:, 'yrcode'], format = '%Y') + pd.to_timedelta(ds['SOS2'], 'D')
+    wrong_year = ((ds[f'observed time to {phase}'] - ds['WC SOS date']).dt.days < 0)
+    ds.loc[out_of_season & wrong_year, 'WC SOS date'] = ds.loc[out_of_season & wrong_year, 'WC SOS date'] - np.timedelta64(365, 'D')
+    return ds
+
+def prepare_African_phen_ds(ds, phase):
+    ds['yrcode'] = ds[f'observed time to {phase}'].dt.year
+    columns_to_keep = ['lat', 'lon', 'Stations_id', f'observed time to {phase}', 'yrcode', 'SOS', 'EOS', 'SOS2', 'EOS2']
+    if np.isin('PlantingDate', ds.columns):
+        print('yes')
+        columns_to_keep.append('PlantingDate')
+    ds = ds[columns_to_keep].groupby(['Stations_id', 'yrcode', 'lat', 'lon']).mean().reset_index()
+    ds = WC_date_from_columns(ds, phase)
+    return ds
+
 def columns_to_datetime(ds, columns):
     for colname in columns:
         ds[colname] = pd.to_datetime(ds[colname], format='mixed')
