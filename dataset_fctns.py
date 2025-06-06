@@ -14,13 +14,16 @@ def WC_date_from_columns(ds, phase):
     ds.loc[out_of_season & wrong_year, 'WC SOS date'] = ds.loc[out_of_season & wrong_year, 'WC SOS date'] - np.timedelta64(365, 'D')
     return ds
 
-def prepare_African_phen_ds(ds, phase):
+def prepare_African_phen_ds(ds, phase, reducer = 'mean'):
     ds['yrcode'] = ds[f'observed time to {phase}'].dt.year
     columns_to_keep = ['lat', 'lon', 'Stations_id', f'observed time to {phase}', 'yrcode', 'SOS', 'EOS', 'SOS2', 'EOS2']
     if np.isin('PlantingDate', ds.columns):
         print('yes')
         columns_to_keep.append('PlantingDate')
-    ds = ds[columns_to_keep].groupby(['Stations_id', 'yrcode', 'lat', 'lon']).mean().reset_index()
+    if reducer == 'mean':
+        ds = ds[columns_to_keep].groupby(['Stations_id', 'yrcode', 'lat', 'lon']).mean().reset_index()
+    elif reducer == 'max':
+        ds = ds[columns_to_keep].groupby(['Stations_id', 'yrcode', 'lat', 'lon']).max().reset_index()
     ds = WC_date_from_columns(ds, phase)
     return ds
 

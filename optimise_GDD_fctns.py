@@ -488,3 +488,49 @@ def run_GDD_and_get_RMSE_derivs(x, ds, driver_variable, latlon_proj = True, resp
          #(comparison_array['modelled time to yellow ripeness']/(1 + comparison_array[f'x{xindex} deriv for yellow ripeness']) - comparison_array['modelled time to yellow ripeness'])).sum() for xindex in range(len(x))
     ]
     return deriv_list#, resps_list#, comparison_array#, comparison_array, derivs_array, accumulated_deriv_time_series#, resps_list#, comparison_array, phase_dates_array, derivs_array, derivs_array2, derivs_array1
+
+def plot_profiles_at_minimum(x_opt, ds, lb=[0.05, 4, 20, 20, 35], ub = [1, 12, 33, 33, 60], 
+                             response_type = 'Trapezoid', phase_list = ['yellow ripeness'],
+                             growing_period_length = 300, new_unfinished_penalisation=False,
+                             thresholds = [100], title = ''):
+    x_min = x_opt.copy()
+    fig, axs = plt.subplots(1, len(x_min), figsize = (15, 4))
+    if response_type == 'Trapezoid':
+        parameter_names = ['Scale', 'T_min', 'T_opt1', 'T_opt2', 'T_max']
+    elif response_type == 'Wang':
+        parameter_names = ['Scale', 'T_min', 'T_opt', 'T_max']
+    elif response_type == 'Convolved':
+        parameter_names = ['Scale', 'T_min', 'T_opt', 'T_max', 'standard deviation', 'day-night gap']
+    for x_index in range(len(x_min)):
+        parameter_name = parameter_names[x_index]
+        print(f'Plotting {parameter_name}')
+        if x_index == 0:
+            x_i = np.arange(x_min[x_index] - 0.02, x_min[x_index] + 0.02, 0.005)#0.002)
+        elif x_index > 2:
+            x_i = np.arange(x_min[x_index] - 1/2, x_min[x_index] + 1/2, 0.1)#0.05)
+        else:
+            x_i = np.arange(x_min[x_index] - 1/2, x_min[x_index] + 1/2, 0.1)#0.05)
+        RMSEs = np.zeros(x_i.shape)
+        for i in range(x_i.shape[0]):
+            #print(x_i[i])
+            x_for_plotting = x_min.copy()
+            x_for_plotting[x_index] = x_i[i]
+            RMSEs[i] = run_GDD_and_get_RMSE(x_for_plotting, ds, 't2m', response_type=response_type, phase_list = phase_list,
+                                            growing_period_length = growing_period_length, new_unfinished_penalisation=new_unfinished_penalisation,
+                                            thresholds = thresholds)
+        axs[x_index].plot(x_i, RMSEs, label = 'Cost as parameter changes')
+        axs[x_index].axvline(lb[x_index], linestyle = '--', color = 'red', label = 'bounds of optimisation')
+        axs[x_index].axvline(ub[x_index], linestyle = '--', color = 'red')
+        #axs[x_index].axvline(x_min[x_index], color = 'green', label = 'Optimized value')
+        axs[x_index].scatter(x_min[x_index], 
+                             run_GDD_and_get_RMSE(x_min, ds, 't2m', response_type=response_type, phase_list = phase_list,
+                                                  growing_period_length = growing_period_length, new_unfinished_penalisation=new_unfinished_penalisation,
+                                                  thresholds = thresholds),
+                            color = 'green', label = 'Optimized value')
+        axs[x_index].set_xlim(x_i.min(), x_i.max())
+        axs[x_index].set(xlabel = parameter_name)
+        axs[x_index].set(ylabel = 'Cost')
+        if x_index == 0:
+            fig.legend()
+    fig.suptitle('Profiles of RMSE for adapting parameters' + title)
+    fig.tight_layout()
