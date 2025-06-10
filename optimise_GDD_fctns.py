@@ -534,3 +534,55 @@ def plot_profiles_at_minimum(x_opt, ds, lb=[0.05, 4, 20, 20, 35], ub = [1, 12, 3
             fig.legend()
     fig.suptitle('Profiles of RMSE for adapting parameters' + title)
     fig.tight_layout()
+
+def put_temp_values_in_frame(driver_array, ds_observed, driver_variable, latlon_proj = True, phase_list = ['yellow ripeness'], SOS_offset = 0, station_locations = False,
+                                start_year = 1999):
+    observations_to_use = ds_observed[['Stations_id', 'Referenzjahr', 'WC SOS date']].where(ds_observed['Referenzjahr'] > start_year).dropna(how='all').drop_duplicates()
+    observations_to_use['WC SOS date'] += np.timedelta64(SOS_offset, 'D')
+    observations_to_use['SOS_year'] = observations_to_use['WC SOS date'].dt.year
+    observations_to_use = observations_to_use.drop_duplicates(subset = ['SOS_year', 'Stations_id'])
+    # make an indexing array to pull values from the array of temperatures
+    time_station = xr.Dataset.from_dataframe(observations_to_use)
+    time_station = time_station.rename({'index':'observation', 'WC SOS date':'time'})
+    #print(time_station)
+    if not(latlon_proj):
+        time_station['time'] += np.timedelta64(12, 'h')
+
+    ## Initiate development time storage object - a list with a value for all the stations, that will change over time and be stored in a list.
+    t_dev = np.zeros(time_station.sizes['observation']) #Continuous development time. When this passes through some thresholds then have change in phase.
+    dev_time_series = [t_dev.copy()]
+    ## Make sure driver dataset uses station id to index this dimension
+    try:
+        driver_array = driver_array.set_xindex(['Stations_id'])
+    except:
+        print('Couldn\'t reset index for station')
+    
+    #Run model
+    for day in range(300):
+        print(day)
+        # Pull values for temperature out of data frame
+        driver_values = driver_array.sel(time_station[['Stations_id', 'time']])#[driver_variable]#.values 
+        #print('sel function applied')
+        driver_frame_at_day = driver_values[[driver_variable, 'Stations_id', 'time']].to_pandas().reset_index().drop(['number', 'lon', 'lat', 'observation'], axis=1)
+        #print('converted to pandas frame')
+        if day == 0:
+            SOS_years = driver_frame_at_day['time'].dt.year
+            
+            #Referenzjahrs = driver_frame_at_day['time'].dt.year + (driver_frame_at_day['time'].dt.dayofyear > 180)
+        driver_frame_at_day['SOS_year'] = SOS_years #driver_frame_at_day['time'].dt.year
+        #print(driver_frame_at_day)
+        driver_frame_at_day = driver_frame_at_day.drop('time', axis=1)
+        driver_frame_at_day = driver_frame_at_day.rename(columns = {driver_variable:f'temperature at day {day}'})
+        #print(len(observations_to_use[['SOS_year', 'Stations_id']]), len(observations_to_use[['SOS_year', 'Stations_id']].drop_duplicates()),
+        #    len(driver_frame_at_day[['SOS_year', 'Stations_id']]), len(driver_frame_at_day[['SOS_year', 'Stations_id']].drop_duplicates()))
+        observations_to_use = observations_to_use.merge(driver_frame_at_day, on=['SOS_year', 'Stations_id'], how='inner')
+        #print(observations_to_use)
+        #print('merged')
+        time_station['time'] += np.timedelta64(1, 'D')
+    ds = observations_to_use.merge(ds_observed[['Referenzjahr', 'Stations_id'] + [f'observed time to {phase}' for phase in phase_list]]).drop_duplicates(subset = ['Referenzjahr', 'Stations_id'])
+    #return ds
+    ds = ds.dropna(subset = ['temperature at day 0'] + [f'observed time to {phase}' for phase in phase_list]).drop_duplicates()#
+    ds[[f'observed time to {phase}' for phase in phase_list]] = ds[[f'observed time to {phase}' for phase in phase_list]] + np.timedelta64(-SOS_offset, 'D')
+    if type(station_locations) != bool:
+        ds = get_station_locations(ds, station_locations)
+    return ds#, observations_to_use, driver_frame_at_day
