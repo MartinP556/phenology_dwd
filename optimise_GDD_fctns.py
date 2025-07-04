@@ -9,8 +9,6 @@ import cartopy.io.shapereader as shpreader
 from sklearn import tree
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import r2_score
-import algopy
-from algopy import UTPM, exp
 import copy
 import calendar
 #import seaborn as sns
