@@ -9,8 +9,6 @@ import cartopy.io.shapereader as shpreader
 from sklearn import tree
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import r2_score
-import algopy
-from algopy import UTPM, exp
 import copy
 import calendar
 #import seaborn as sns
@@ -488,3 +486,295 @@ def run_GDD_and_get_RMSE_derivs(x, ds, driver_variable, latlon_proj = True, resp
          #(comparison_array['modelled time to yellow ripeness']/(1 + comparison_array[f'x{xindex} deriv for yellow ripeness']) - comparison_array['modelled time to yellow ripeness'])).sum() for xindex in range(len(x))
     ]
     return deriv_list#, resps_list#, comparison_array#, comparison_array, derivs_array, accumulated_deriv_time_series#, resps_list#, comparison_array, phase_dates_array, derivs_array, derivs_array2, derivs_array1
+
+def plot_profiles_at_minimum(x_opt, ds, lb=[0.05, 4, 20, 20, 35], ub = [1, 12, 33, 33, 60], 
+                             response_type = 'Trapezoid', phase_list = ['yellow ripeness'],
+                             growing_period_length = 300, new_unfinished_penalisation=False,
+                             thresholds = [100], title = ''):
+    x_min = x_opt.copy()
+    fig, axs = plt.subplots(1, len(x_min), figsize = (15, 4))
+    if response_type == 'Trapezoid':
+        parameter_names = ['Scale', 'T_min', 'T_opt1', 'T_opt2', 'T_max']
+    elif response_type == 'Wang':
+        parameter_names = ['Scale', 'T_min', 'T_opt', 'T_max']
+    elif response_type == 'Convolved':
+        parameter_names = ['Scale', 'T_min', 'T_opt', 'T_max', 'standard deviation', 'day-night gap']
+    for x_index in range(len(x_min)):
+        parameter_name = parameter_names[x_index]
+        print(f'Plotting {parameter_name}')
+        if x_index == 0:
+            x_i = np.arange(x_min[x_index] - 0.02, x_min[x_index] + 0.02, 0.005)#0.002)
+        elif x_index > 2:
+            x_i = np.arange(x_min[x_index] - 1/2, x_min[x_index] + 1/2, 0.1)#0.05)
+        else:
+            x_i = np.arange(x_min[x_index] - 1/2, x_min[x_index] + 1/2, 0.1)#0.05)
+        RMSEs = np.zeros(x_i.shape)
+        for i in range(x_i.shape[0]):
+            #print(x_i[i])
+            x_for_plotting = x_min.copy()
+            x_for_plotting[x_index] = x_i[i]
+            RMSEs[i] = run_GDD_and_get_RMSE(x_for_plotting, ds, 't2m', response_type=response_type, phase_list = phase_list,
+                                            growing_period_length = growing_period_length, new_unfinished_penalisation=new_unfinished_penalisation,
+                                            thresholds = thresholds)
+        axs[x_index].plot(x_i, RMSEs, label = 'Cost as parameter changes')
+        axs[x_index].axvline(lb[x_index], linestyle = '--', color = 'red', label = 'bounds of optimisation')
+        axs[x_index].axvline(ub[x_index], linestyle = '--', color = 'red')
+        #axs[x_index].axvline(x_min[x_index], color = 'green', label = 'Optimized value')
+        axs[x_index].scatter(x_min[x_index], 
+                             run_GDD_and_get_RMSE(x_min, ds, 't2m', response_type=response_type, phase_list = phase_list,
+                                                  growing_period_length = growing_period_length, new_unfinished_penalisation=new_unfinished_penalisation,
+                                                  thresholds = thresholds),
+                            color = 'green', label = 'Optimized value')
+        axs[x_index].set_xlim(x_i.min(), x_i.max())
+        axs[x_index].set(xlabel = parameter_name)
+        axs[x_index].set(ylabel = 'Cost')
+        if x_index == 0:
+            fig.legend()
+    fig.suptitle('Profiles of RMSE for adapting parameters' + title)
+    fig.tight_layout()
+
+def put_temp_values_in_frame(driver_array, ds_observed, driver_variable, latlon_proj = True, phase_list = ['yellow ripeness'], SOS_offset = 0, station_locations = False,
+                                start_year = 1999):
+    observations_to_use = ds_observed[['Stations_id', 'Referenzjahr', 'WC SOS date']].where(ds_observed['Referenzjahr'] > start_year).dropna(how='all').drop_duplicates()
+    observations_to_use['WC SOS date'] += np.timedelta64(SOS_offset, 'D')
+    observations_to_use['SOS_year'] = observations_to_use['WC SOS date'].dt.year
+    observations_to_use = observations_to_use.drop_duplicates(subset = ['SOS_year', 'Stations_id'])
+    # make an indexing array to pull values from the array of temperatures
+    time_station = xr.Dataset.from_dataframe(observations_to_use)
+    time_station = time_station.rename({'index':'observation', 'WC SOS date':'time'})
+    #print(time_station)
+    if not(latlon_proj):
+        time_station['time'] += np.timedelta64(12, 'h')
+
+    ## Initiate development time storage object - a list with a value for all the stations, that will change over time and be stored in a list.
+    t_dev = np.zeros(time_station.sizes['observation']) #Continuous development time. When this passes through some thresholds then have change in phase.
+    dev_time_series = [t_dev.copy()]
+    ## Make sure driver dataset uses station id to index this dimension
+    try:
+        driver_array = driver_array.set_xindex(['Stations_id'])
+    except:
+        print('Couldn\'t reset index for station')
+    
+    #Run model
+    for day in range(300):
+        print(day)
+        # Pull values for temperature out of data frame
+        driver_values = driver_array.sel(time_station[['Stations_id', 'time']])#[driver_variable]#.values 
+        #print('sel function applied')
+        driver_frame_at_day = driver_values[[driver_variable, 'Stations_id', 'time']].to_pandas().reset_index().drop(['number', 'lon', 'lat', 'observation'], axis=1)
+        #print('converted to pandas frame')
+        if day == 0:
+            SOS_years = driver_frame_at_day['time'].dt.year
+            
+            #Referenzjahrs = driver_frame_at_day['time'].dt.year + (driver_frame_at_day['time'].dt.dayofyear > 180)
+        driver_frame_at_day['SOS_year'] = SOS_years #driver_frame_at_day['time'].dt.year
+        #print(driver_frame_at_day)
+        driver_frame_at_day = driver_frame_at_day.drop('time', axis=1)
+        driver_frame_at_day = driver_frame_at_day.rename(columns = {driver_variable:f'temperature at day {day}'})
+        #print(len(observations_to_use[['SOS_year', 'Stations_id']]), len(observations_to_use[['SOS_year', 'Stations_id']].drop_duplicates()),
+        #    len(driver_frame_at_day[['SOS_year', 'Stations_id']]), len(driver_frame_at_day[['SOS_year', 'Stations_id']].drop_duplicates()))
+        observations_to_use = observations_to_use.merge(driver_frame_at_day, on=['SOS_year', 'Stations_id'], how='inner')
+        #print(observations_to_use)
+        #print('merged')
+        time_station['time'] += np.timedelta64(1, 'D')
+    ds = observations_to_use.merge(ds_observed[['Referenzjahr', 'Stations_id'] + [f'observed time to {phase}' for phase in phase_list]]).drop_duplicates(subset = ['Referenzjahr', 'Stations_id'])
+    #return ds
+    ds = ds.dropna(subset = ['temperature at day 0'] + [f'observed time to {phase}' for phase in phase_list]).drop_duplicates()#
+    ds[[f'observed time to {phase}' for phase in phase_list]] = ds[[f'observed time to {phase}' for phase in phase_list]] + np.timedelta64(-SOS_offset, 'D')
+    if type(station_locations) != bool:
+        ds = get_station_locations(ds, station_locations)
+    return ds#, observations_to_use, driver_frame_at_day
+
+def Wang_Engel_Integral(T, T_min, T_opt, T_max):
+    alpha = np.log(2)/np.log( (T_max - T_min)/(T_opt - T_min) )
+    f_1 = (2*(np.sign(T - T_min)*(T - T_min))**(alpha + 1))*((T_opt - T_min)**alpha) / (alpha + 1)
+    f_2 = ((np.sign(T - T_min)*(T - T_min))**((2*alpha) + 1)) / ((2*alpha) + 1)
+    f_T = ( f_1 - f_2 ) / ((T_opt - T_min)**(2*alpha))
+    f_T = np.nan_to_num(f_T)
+
+    f_1_max = (2*(T_max - T_min)**(alpha + 1))*((T_opt - T_min)**alpha) / (alpha + 1)
+    f_2_max = ((T_max - T_min)**((2*alpha) + 1)) / ((2*alpha) + 1)
+    f_T_max = ( f_1_max - f_2_max ) / ((T_opt - T_min)**(2*alpha))
+    return f_T*(T >= T_min)*(T<= T_max) + f_T_max*(T > T_max)
+    
+def Convolved_Wang_Engel(T, T_min, T_opt, T_max, gap = 4):
+    return (1/(2*gap))*(Wang_Engel_Integral(np.minimum(T + gap, T_max), T_min, T_opt, T_max) - Wang_Engel_Integral(np.maximum(T - gap, T_min), T_min, T_opt, T_max))#
+    
+def integrand(T, T_min, T_opt, T_max, d, s, gap):
+    #return modelling_fctns.Wang_Engel_Temp_response(T, T_min, T_opt, T_max, beta = 1.5)*np.exp(-((T - d)**2)/(2*(s**2)))
+    return Convolved_Wang_Engel(T, T_min, T_opt, T_max, gap = gap)*(1/np.sqrt(2*np.pi*(s**2)))*np.exp(-((T - d)**2)/(2*(s**2)))
+    
+def expint(T_min, T_opt, T_max, d, s, gap):
+    return quad(integrand, T_min, T_max, args=(T_min, T_opt, T_max, d, s, gap))[0]
+
+def run_GDD_and_get_RMSE(x, ds, driver_variable, latlon_proj = True, 
+                         response_type = 'Trapezoid', phase_list = ['beginning of flowering'], 
+                         new_unfinished_penalisation=False,
+                         growing_period_length = 300, thresholds = [100]):
+    if response_type == 'Trapezoid':
+        def response(meantemp):
+            return x[0]*modelling_fctns.Trapezoid_Temp_response(meantemp, x[1], x[2], x[3], x[4])
+    elif response_type == 'Wang':
+        def response(meantemp):
+            return x[0]*modelling_fctns.Wang_Engel_Temp_response(meantemp, x[1], x[2], x[3])
+    elif response_type == 'Convolved':
+        table = vec_expint(x[1], x[2], x[3], np.arange(0, 50, 0.5), 2.5, 5)#, x[4], x[5])#x[2]
+        def response(meantemp):
+            return x[0]*table[(np.round(meantemp/5, decimals = 1)*10).astype(int)]*(meantemp > 0)
+    elif response_type == 'Spline2':
+        spl = scipy.interpolate.BSpline(np.arange(0, 40, 4), np.array(x), 3)
+        def response(meantemp):
+            return np.maximum(spl(meantemp), 0)
+    elif response_type == 'Spline':
+        def B_0(u):
+            return ((1 - u**2)**2)*(u >= -1)*(u <= 1) #np.maximum((1/6)*(-(x**3) + 3*(x**2) - 3*x + 1), 0)
+        def response(meantemp):
+            resp = 0
+            for i, coeff in enumerate(x):
+                resp += coeff*B_0(0.25*(meantemp - i*2))
+            return np.maximum(resp, 0)
+    ## Initiate development time storage object - a list with a value for all the stations, that will change over time and be stored in a list.
+    t_dev = np.zeros(len(ds)) #Continuous development time. When this passes through some thresholds then have change in phase.
+    dev_time_series = [t_dev.copy()]
+    ## Make sure driver dataset uses station id to index this dimension
+    
+    #Run model
+    for day in range(growing_period_length):
+        # Pull values for temperature out of data frame
+        driver_values = ds[f'temperature at day {day}']
+        # Calculate the response for each of these temperatures and add it to the total accumulated temperature
+        t_dev += response(driver_values)#, t_dev)
+        #Store the accumulated temperature in an array
+        dev_time_series.append(t_dev.copy())
+
+    # Add the year and station codes for indexing later and to check that extracting values didn't mix up indexes
+    dev_time_series.append(ds['Referenzjahr'].values)
+    dev_time_series.append(ds['Stations_id'].values)
+    #print([p.shape for p in dev_time_series])
+    model_dev_time_series = np.array(dev_time_series)
+    #driver_array['Development Time'] = (('days from emergence', 'Emergence observation'), model_dev_time_series)
+    column_names = np.concatenate([np.array([f'modelled time to {phase}' for phase in phase_list]), ['Referenzjahr'], ['Stations_id']])
+    phase_dates_array = np.zeros((len(thresholds), model_dev_time_series.shape[1]))
+    for obs_index in range(model_dev_time_series.shape[1]):
+        phase_dates_array[:, obs_index] = np.digitize(thresholds, model_dev_time_series[:-2, obs_index].astype(np.float64))    
+    #print(phase_dates_array)
+    phase_dates_array = np.concatenate([phase_dates_array, [model_dev_time_series[-2]], [model_dev_time_series[-1]]], axis=0)
+    phase_dates_array = pd.DataFrame(phase_dates_array.T, columns = column_names)
+    comparison_array = ds.merge(phase_dates_array, how='left', on=['Referenzjahr', 'Stations_id']).dropna()
+    unfinished_penalty=0
+    if new_unfinished_penalisation:
+        unfinished_penalty = max((comparison_array[f'modelled time to {phase_list[0]}'] >growing_period_length - 3).sum() - 0.03*comparison_array.shape[0], 0)
+        comparison_array = comparison_array.where(comparison_array[f'modelled time to {phase_list[0]}'] < growing_period_length).dropna()
+    def RMSE(residuals):
+        if len(residuals) == 0:
+            return 0
+        else:
+            return np.sqrt(np.mean(residuals**2))
+    residuals = np.concatenate([(comparison_array[f'observed time to {phase}'].dt.days - comparison_array[f'modelled time to {phase}']).values for phase in phase_list])
+    return RMSE(residuals) + unfinished_penalty#, comparison_array
+
+def run_GDD_and_get_RMSE_derivs(x, ds, driver_variable, latlon_proj = True, response_type = 'Trapezoid', 
+                                phase_list = ['beginning of flowering'],growing_period_length = 300,
+                                thresholds = [100]):
+    only_phase = phase_list[0]
+    if response_type == 'Trapezoid':
+        def response(meantemp):
+            #return x[0]*modelling_fctns.Wang_Engel_Temp_response(meantemp, x[1], x[2], x[3])
+            return x[0]*modelling_fctns.Trapezoid_Temp_response(meantemp, x[1], x[2], x[3], x[4])
+    elif response_type == 'Wang':
+        def response(meantemp):
+            #return x[0]*modelling_fctns.Wang_Engel_Temp_response(meantemp, x[1], x[2], x[3])
+            return x[0]*modelling_fctns.Wang_Engel_Temp_response(meantemp, x[1], x[2], x[3])
+    elif response_type == 'Spline':
+        def B_0(u):
+            return 0.1*((1 - u**2)**2)*(u >= -1)*(u <= 1) #np.maximum((1/6)*(-(x**3) + 3*(x**2) - 3*x + 1), 0)
+        def response(meantemp):
+            resp = 0
+            for i, coeff in enumerate(x):
+                resp += coeff*B_0(0.25*(meantemp - i*2))
+            return np.maximum(resp, 0)
+        def deriv(meantemp):
+            return [B_0(0.25*(meantemp - i*2)) for i in range(len(x))]
+    ## Initiate development time storage object - a list with a value for all the stations, that will change over time and be stored in a list.
+    t_dev = np.zeros(len(ds)) #Continuous development time. When this passes through some thresholds then have change in phase.
+    accumulated_deriv_time_series = [[t_dev.copy()] for count in range(len(x))]
+    dev_time_series = [t_dev.copy()]
+    list_of_responses = [] 
+    #Run model
+    for day in range(growing_period_length):
+        # Pull values for temperature out of data frame
+        driver_values = ds[f'temperature at day {day}'].values
+        resp = response(driver_values)
+        # Calculate the response for each of these temperatures and add it to the total accumulated temperature
+        if response_type == 'Trapezoid':
+            response_deriv = x[0]*Trapezoid_Temp_derivs(driver_values, x[1], x[2], x[3], x[4])
+            response_deriv[0, :] = response_deriv[0, :]/x[0]
+        elif response_type == 'Wang':
+            response_deriv_no_scale = Wang_Temp_Derivs(driver_values, x[1], x[2], x[3])
+            response_deriv = [resp/x[0]] + [x[0]*deriv for deriv in response_deriv_no_scale]
+        elif response_type == 'Spline':
+            response_deriv = deriv(driver_values)
+        for x_index in range(len(x)):
+            accumulated_deriv_time_series[x_index].append(accumulated_deriv_time_series[x_index][-1] + response_deriv[x_index])
+            #print(response_deriv[x_index])
+        t_dev += resp#, t_dev)
+        list_of_responses.append(resp)
+        #print(len(accumulated_deriv_time_series[0][-1]))
+        #print(accumulated_deriv_time_series[0][-1], t_dev/x[0])
+        #Store the accumulated temperature in an array
+        dev_time_series.append(t_dev.copy())
+    #print(accumulated_deriv_time_series[2][100])
+
+    # Add the year and station codes for indexing later and to check that extracting values didn't mix up indexes
+    dev_time_series.append(ds['Referenzjahr'].values)
+    dev_time_series.append(ds['Stations_id'].values)
+    #print([p.shape for p in dev_time_series])
+    model_dev_time_series = np.array(dev_time_series)
+    #driver_array['Development Time'] = (('days from emergence', 'Emergence observation'), model_dev_time_series)
+    column_names = np.concatenate([np.array([f'modelled time to {phase}' for phase in phase_list]), ['Referenzjahr'], ['Stations_id']])
+    phase_dates_array = np.zeros((len(thresholds), model_dev_time_series.shape[1]))
+    resps_list = np.zeros(model_dev_time_series.shape[1])
+    for obs_index in range(model_dev_time_series.shape[1]):
+        phase_dates_array[:, obs_index] = np.digitize(thresholds, model_dev_time_series[:-2, obs_index].astype(np.float64)) - 1
+        resps_list[obs_index] = list_of_responses[int(phase_dates_array[-1, obs_index]) - 1][obs_index].mean()
+    if response_type == 'Spline':
+        resps_list += 50000*(resps_list == 0)
+    else:
+        resps_list += 0.1*x[0]*(resps_list == 0)
+    print(resps_list)
+    #print(phase_dates_array)
+    phase_dates_array = np.concatenate([phase_dates_array, [model_dev_time_series[-2]], [model_dev_time_series[-1]]], axis=0)
+    phase_dates_array = pd.DataFrame(phase_dates_array.T, columns = column_names).astype('int64')
+    for x_index in range(len(x)):
+        accumulated_derivs = accumulated_deriv_time_series[x_index]
+        accumulated_derivs.append(ds['Referenzjahr'].values)
+        accumulated_derivs.append(ds['Stations_id'].values)
+        #print(accumulated_derivs[300])
+        for phase in phase_list:
+            accumulated_derivs.append(np.array(accumulated_derivs).T[np.arange(len(ds)), phase_dates_array[f'modelled time to {phase}'].values])
+        #print(accumulated_derivs)
+        column_names = np.array(['Referenzjahr', 'Stations_id'] + [f'x{x_index} deriv for {phase}'])
+        #print(np.array(accumulated_derivs[301]))
+        if x_index == 0:
+            #derivs_array1 = pd.DataFrame(np.array(accumulated_derivs[301:]).T, columns = column_names)
+            derivs_array = pd.DataFrame(np.array(accumulated_derivs[(growing_period_length + 1):]).T, columns = column_names)
+            #print(derivs_array.shape)
+        else:
+            derivs_array2 = pd.DataFrame(np.array(accumulated_derivs[(growing_period_length + 1):]).T, columns = column_names)
+            derivs_array = derivs_array.merge(derivs_array2, how='left', on=['Referenzjahr', 'Stations_id'])
+            #print(derivs_array.shape)
+    #print(derivs_array.loc[np.isnan(derivs_array['x10 deriv for beginning of flowering'])])
+    comparison_array = ds.merge(phase_dates_array, how='left', on=['Referenzjahr', 'Stations_id']).dropna()
+    comparison_array = comparison_array.merge(derivs_array, on=['Referenzjahr', 'Stations_id'])
+    def RMSE(residuals):
+        return np.sqrt(np.mean(residuals**2))
+    residuals = np.concatenate([(comparison_array[f'observed time to {phase}'].dt.days - comparison_array[f'modelled time to {phase}']).values for phase in phase_list])
+    error = RMSE(residuals)
+    #print(len(residuals), len(comparison_array))
+    #print(residuals)
+    deriv_list = [
+        -((comparison_array[f'modelled time to {only_phase}'] - comparison_array[f'observed time to {only_phase}'].dt.days)*
+         comparison_array[f'x{xindex} deriv for {only_phase}']/resps_list).mean()/error for xindex in range(len(x))#x[0]
+         #(comparison_array['modelled time to yellow ripeness']/(1 + comparison_array[f'x{xindex} deriv for yellow ripeness']) - comparison_array['modelled time to yellow ripeness'])).sum() for xindex in range(len(x))
+    ]
+    return deriv_list#, derivs_array#, resps_list#, comparison_array#, comparison_array, derivs_array, accumulated_deriv_time_series#, resps_list#, comparison_array, phase_dates_array, derivs_array, derivs_array2, derivs_array1
