@@ -3,6 +3,7 @@ import pandas as pd
 import xarray as xr
 import scipy.optimize
 import scipy.stats
+from scipy.integrate import quad
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 import cartopy.io.shapereader as shpreader
@@ -211,10 +212,10 @@ class Phenology_set:
                 just_phase= just_phase.assign(**{f'observed time to {phase}': just_phase['Eintrittsdatum'] - just_phase['WC SOS date']})
                 self.ds_observed = self.ds_observed.merge(just_phase[[f'observed time to {phase}', 'Referenzjahr', 'Stations_id']], how = 'left', on = ['Referenzjahr', 'Stations_id'])
         else:
-            observed_to_first_stage = dataset_fctns.time_stage_to_stage(self.phen_data, 'beginning of emergence', self.phase_list[0], winter_sowing=winter_sowing).dropna()
+            observed_to_first_stage = dataset_fctns.time_stage_to_stage(self.phen_data, 'beginning of emergence', self.phase_list[0], winter_sowing=winter_sowing).dropna(how='all')
             self.ds_observed = pd.DataFrame({f'observed time to {self.phase_list[0]}': observed_to_first_stage})
             for phase in self.phase_list[1:]:
-                self.ds_observed[f'observed time to {phase}'] = dataset_fctns.time_stage_to_stage(self.phen_data, 'beginning of emergence', phase, winter_sowing=winter_sowing).dropna()
+                self.ds_observed[f'observed time to {phase}'] = dataset_fctns.time_stage_to_stage(self.phen_data, 'beginning of emergence', phase, winter_sowing=winter_sowing).dropna(how='all')
             self.ds_observed = self.ds_observed.reset_index()
             self.ds_observed = dataset_fctns.get_station_locations(self.ds_observed, self.station_data)
             self.ds_observed = self.ds_observed.merge(self.obs_for_GDD[['Eintrittsdatum', 'Referenzjahr', 'Stations_id']], how = 'outer', on=['Referenzjahr', 'Stations_id']).rename(columns={'Eintrittsdatum':'emergence date'})
@@ -356,11 +357,11 @@ def run_GDD_and_get_RMSE(x, ds, driver_variable, latlon_proj = True,
     #print(phase_dates_array)
     phase_dates_array = np.concatenate([phase_dates_array, [model_dev_time_series[-2]], [model_dev_time_series[-1]]], axis=0)
     phase_dates_array = pd.DataFrame(phase_dates_array.T, columns = column_names)
-    comparison_array = ds.merge(phase_dates_array, how='left', on=['Referenzjahr', 'Stations_id']).dropna()
+    comparison_array = ds.merge(phase_dates_array, how='left', on=['Referenzjahr', 'Stations_id']).dropna(how='all')
     unfinished_penalty=0
     if new_unfinished_penalisation:
         unfinished_penalty = max((comparison_array[f'modelled time to {phase_list[0]}'] >growing_period_length - 3).sum() - 0.03*comparison_array.shape[0], 0)
-        comparison_array = comparison_array.where(comparison_array[f'modelled time to {phase_list[0]}'] < growing_period_length).dropna()
+        comparison_array = comparison_array.where(comparison_array[f'modelled time to {phase_list[0]}'] < growing_period_length).dropna(how='all')
     def RMSE(residuals):
         if len(residuals) == 0:
             return 0
@@ -472,7 +473,7 @@ def run_GDD_and_get_RMSE_derivs(x, ds, driver_variable, latlon_proj = True, resp
             derivs_array2 = pd.DataFrame(np.array(accumulated_derivs[(growing_period_length + 1):]).T, columns = column_names)
             derivs_array = derivs_array.merge(derivs_array2, how='left', on=['Referenzjahr', 'Stations_id'])
             #print(derivs_array.shape)
-    comparison_array = ds.merge(phase_dates_array, how='left', on=['Referenzjahr', 'Stations_id']).dropna()
+    comparison_array = ds.merge(phase_dates_array, how='left', on=['Referenzjahr', 'Stations_id']).dropna(how='all')
     comparison_array = comparison_array.merge(derivs_array, on=['Referenzjahr', 'Stations_id'])
     def RMSE(residuals):
         return np.sqrt(np.mean(residuals**2))
@@ -660,11 +661,11 @@ def run_GDD_and_get_RMSE(x, ds, driver_variable, latlon_proj = True,
     #print(phase_dates_array)
     phase_dates_array = np.concatenate([phase_dates_array, [model_dev_time_series[-2]], [model_dev_time_series[-1]]], axis=0)
     phase_dates_array = pd.DataFrame(phase_dates_array.T, columns = column_names)
-    comparison_array = ds.merge(phase_dates_array, how='left', on=['Referenzjahr', 'Stations_id']).dropna()
+    comparison_array = ds.merge(phase_dates_array, how='left', on=['Referenzjahr', 'Stations_id']).dropna(how='all')
     unfinished_penalty=0
     if new_unfinished_penalisation:
         unfinished_penalty = max((comparison_array[f'modelled time to {phase_list[0]}'] >growing_period_length - 3).sum() - 0.03*comparison_array.shape[0], 0)
-        comparison_array = comparison_array.where(comparison_array[f'modelled time to {phase_list[0]}'] < growing_period_length).dropna()
+        comparison_array = comparison_array.where(comparison_array[f'modelled time to {phase_list[0]}'] < growing_period_length).dropna(how='all')
     def RMSE(residuals):
         if len(residuals) == 0:
             return 0
@@ -764,7 +765,7 @@ def run_GDD_and_get_RMSE_derivs(x, ds, driver_variable, latlon_proj = True, resp
             derivs_array = derivs_array.merge(derivs_array2, how='left', on=['Referenzjahr', 'Stations_id'])
             #print(derivs_array.shape)
     #print(derivs_array.loc[np.isnan(derivs_array['x10 deriv for beginning of flowering'])])
-    comparison_array = ds.merge(phase_dates_array, how='left', on=['Referenzjahr', 'Stations_id']).dropna()
+    comparison_array = ds.merge(phase_dates_array, how='left', on=['Referenzjahr', 'Stations_id']).dropna(how='all')
     comparison_array = comparison_array.merge(derivs_array, on=['Referenzjahr', 'Stations_id'])
     def RMSE(residuals):
         return np.sqrt(np.mean(residuals**2))
