@@ -319,56 +319,137 @@ def put_ERA5_in_array(ds):
     ds['ERA5 clim'] = ERA5_clim.t2m.interp({'lat':lats_array, 'lon':lons_array}).values
     return ds
 
-def run_GDD_and_get_RMSE(x, ds, driver_variable, latlon_proj = True, 
-                         response_type = 'Trapezoid', phase_list = ['beginning of flowering'], 
-                         new_unfinished_penalisation=False,
-                         growing_period_length = 300, thresholds = [100]):
+def run_GDD(x, ds, driver_variable, latlon_proj = True, response_type = 'Trapezoid', 
+                             phase_list = ['beginning of flowering'], exclude_unfinished = False,
+                             growing_period_length = 300, thresholds = [100], 
+                             title_extra='', method='scatter', savename = False, plot=False):
     if response_type == 'Trapezoid':
         def response(meantemp):
-            return x[0]*modelling_fctns.Trapezoid_Temp_response(meantemp, x[1], x[2], x[3], x[4])
+            #return x[0]*modelling_fctns.Wang_Engel_Temp_response(meantemp, x[1], x[2], x[3])
+            return x[0]*modelling_fctns.Trapezoid_Temp_response(meantemp, x[1], x[2], 0.2, 3)#x[3], x[4])
     elif response_type == 'Wang':
         def response(meantemp):
+            #return x[0]*modelling_fctns.Wang_Engel_Temp_response(meantemp, x[1], x[2], x[3])
             return x[0]*modelling_fctns.Wang_Engel_Temp_response(meantemp, x[1], x[2], x[3])
+    elif response_type == 'Convolved':
+        table = vec_expint(x[1], x[2], x[3], np.arange(0, 50, 0.5), 7, 3)#, x[4], x[5])#x[2]
+        def response(meantemp):
+            return x[0]*table[(np.round(meantemp/5, decimals = 1)*10).astype(int)]*(meantemp > 0)
 
-    ## Initiate development time storage object - a list with a value for all the stations, that will change over time and be stored in a list.
-    t_dev = np.zeros(len(ds)) #Continuous development time. When this passes through some thresholds then have change in phase.
-    dev_time_series = [t_dev.copy()]
-    ## Make sure driver dataset uses station id to index this dimension
-    
-    #Run model
-    for day in range(growing_period_length):
-        # Pull values for temperature out of data frame
-        driver_values = ds[f'temperature at day {day}']
-        # Calculate the response for each of these temperatures and add it to the total accumulated temperature
-        t_dev += response(driver_values)#, t_dev)
-        #Store the accumulated temperature in an array
-        dev_time_series.append(t_dev.copy())
-
-    # Add the year and station codes for indexing later and to check that extracting values didn't mix up indexes
-    dev_time_series.append(ds['Referenzjahr'].values)
-    dev_time_series.append(ds['Stations_id'].values)
-    #print([p.shape for p in dev_time_series])
-    model_dev_time_series = np.array(dev_time_series)
-    #driver_array['Development Time'] = (('days from emergence', 'Emergence observation'), model_dev_time_series)
-    column_names = np.concatenate([np.array([f'modelled time to {phase}' for phase in phase_list]), ['Referenzjahr'], ['Stations_id']])
+    driver_columns = [f'{driver_variable} at day {day}' for day in range(growing_period_length)]
+    ds_for_model = ds[driver_columns + ['year', 'Stations_id']].copy()
+    #ds_for_model.loc[:, driver_columns] = ds_for_model.loc[:, driver_columns]#.round(decimals = 10).astype(np.float64)
+    ds_for_model.loc[:, driver_columns] = response(ds_for_model[[f'{driver_variable} at day {day}' for day in range(growing_period_length)]]).cumsum(axis=1)
+    model_dev_time_series = ds_for_model.values.T
+    column_names = np.concatenate([np.array([f'modelled time to {phase}' for phase in phase_list]), ['year'], ['Stations_id']])
     phase_dates_array = np.zeros((len(thresholds), model_dev_time_series.shape[1]))
     for obs_index in range(model_dev_time_series.shape[1]):
         phase_dates_array[:, obs_index] = np.digitize(thresholds, model_dev_time_series[:-2, obs_index].astype(np.float64))    
     #print(phase_dates_array)
     phase_dates_array = np.concatenate([phase_dates_array, [model_dev_time_series[-2]], [model_dev_time_series[-1]]], axis=0)
     phase_dates_array = pd.DataFrame(phase_dates_array.T, columns = column_names)
-    comparison_array = ds.merge(phase_dates_array, how='left', on=['Referenzjahr', 'Stations_id']).dropna(how='all')
+    comparison_array = ds.merge(phase_dates_array, how='left', on=['year', 'Stations_id']).dropna(how='all')
+    if plot:
+        plot_from_comparison_array(comparison_array, title_extra=title_extra, method=method, savename=savename, 
+                                  phase_list=phase_list, exclude_unfinished=exclude_unfinished, growing_period_length=growing_period_length)
+    return comparison_array
+
+def run_GDD_and_get_RMSE(x, ds, driver_variable, latlon_proj = True, 
+                         response_type = 'Trapezoid', phase_list = ['beginning of flowering'], 
+                         new_unfinished_penalisation=False,
+                         growing_period_length = 300, thresholds = [100]):
+    comparison_array = run_GDD(x, ds, driver_variable, latlon_proj=latlon_proj,
+                               response_type=response_type, phase_list=phase_list,
+                               growing_period_length=growing_period_length, thresholds=thresholds)
     unfinished_penalty=0
     if new_unfinished_penalisation:
         unfinished_penalty = max((comparison_array[f'modelled time to {phase_list[0]}'] >growing_period_length - 3).sum() - 0.03*comparison_array.shape[0], 0)
-        comparison_array = comparison_array.where(comparison_array[f'modelled time to {phase_list[0]}'] < growing_period_length).dropna(how='all')
+        comparison_array = comparison_array.where(comparison_array[f'modelled time to {phase_list[0]}'] < growing_period_length).dropna()
     def RMSE(residuals):
         if len(residuals) == 0:
             return 0
         else:
             return np.sqrt(np.mean(residuals**2))
-    residuals = np.concatenate([(comparison_array[f'observed time to {phase}'].dt.days - comparison_array[f'modelled time to {phase}']).values for phase in phase_list])
+    phase = phase_list[0]
+    residuals = (comparison_array[f'observed time to {phase}'] - comparison_array[f'modelled time to {phase}']).values # np.concatenate([(comparison_array[f'observed time to {phase}'].dt.days - comparison_array[f'modelled time to {phase}']).values for phase in phase_list])
     return RMSE(residuals) + unfinished_penalty#, comparison_array
+
+def run_GDD_and_get_RMSE_bias_term(x, ds, driver_variable, latlon_proj = True, 
+                         response_type = 'Trapezoid', phase_list = ['beginning of flowering'], 
+                         new_unfinished_penalisation=False,
+                         growing_period_length = 300, thresholds = [100]):
+    comparison_array = run_GDD(x[:-1], ds, driver_variable, latlon_proj=latlon_proj,
+                               response_type=response_type, phase_list=phase_list,
+                               growing_period_length=growing_period_length, thresholds=thresholds)
+    unfinished_penalty=0
+    if new_unfinished_penalisation:
+        unfinished_penalty = max((comparison_array[f'modelled time to {phase_list[0]}'] >growing_period_length - 3).sum() - 0.03*comparison_array.shape[0], 0)
+        comparison_array = comparison_array.where(comparison_array[f'modelled time to {phase_list[0]}'] < growing_period_length).dropna()
+    def RMSE(residuals):
+        if len(residuals) == 0:
+            return 0
+        else:
+            return np.sqrt(np.mean(residuals**2))
+    phase = phase_list[0]
+    residuals = (comparison_array[f'observed time to {phase}'] - 5*x[-1] - comparison_array[f'modelled time to {phase}']).values # np.concatenate([(comparison_array[f'observed time to {phase}'].dt.days - comparison_array[f'modelled time to {phase}']).values for phase in phase_list])
+    return RMSE(residuals) + unfinished_penalty#, comparison_array
+
+def run_GDD_transformed_space(x, ds, driver_variable, latlon_proj = True, response_type = 'Trapezoid', 
+                             phase_list = ['beginning of flowering'], exclude_unfinished = False,
+                             growing_period_length = 300, thresholds = [100], 
+                             title_extra='', method='scatter', savename = False, plot=False):
+    if response_type == 'Trapezoid':
+        def response(meantemp):
+            #return x[0]*modelling_fctns.Wang_Engel_Temp_response(meantemp, x[1], x[2], x[3])
+            return x[0]*modelling_fctns.Trapezoid_Temp_response(meantemp, x[1], x[2], 0.2, 3)#x[3], x[4])
+    elif response_type == 'Wang':
+        def response(meantemp):
+            #return x[0]*modelling_fctns.Wang_Engel_Temp_response(meantemp, x[1], x[2], x[3])
+            return x[0]*modelling_fctns.Wang_Engel_Temp_response(meantemp, x[1], x[2], x[3])
+    elif response_type == 'Convolved':
+        table = vec_expint(x[1], x[2], x[3], np.arange(0, 50, 0.5), 2.5, 5)#, x[4], x[5])#x[2]
+        def response(meantemp):
+            return x[0]*table[(np.round(meantemp/5, decimals = 1)*10).astype(int)]*(meantemp > 0)
+
+    driver_columns = [f'{driver_variable} at day {day}' for day in range(growing_period_length)]
+    ds_for_model = ds[driver_columns + ['year', 'Stations_id']].copy()
+    #ds_for_model.loc[:, driver_columns] = ds_for_model.loc[:, driver_columns]#.round(decimals = 10).astype(np.float64)
+    ds_for_model.loc[:, driver_columns] = response(ds_for_model[[f'{driver_variable} at day {day}' for day in range(growing_period_length)]]).cumsum(axis=1)
+    dev_time_series = ds_for_model.values.T
+    phase = phase_list[0]
+    model_dev_time_series = np.stack([dev_time_series.T[range(dev_time_series.shape[1]), ds[f'observed time to {phase}'].values - 1], dev_time_series.T[range(dev_time_series.shape[1]), ds[f'observed time to {phase}'].values], dev_time_series[-2, :], dev_time_series[-1, :]])
+    #driver_array['Development Time'] = (('days from emergence', 'Emergence observation'), model_dev_time_series)
+    #Note length + 1 because we have included the day 0 in the modelled GDD
+    #column_names = np.concatenate([np.array([f'modelled GDD at day {n}' for n in range(growing_period_length + 1)]), ['Referenzjahr', 'Stations_id']])
+    #dev_array = pd.DataFrame(dev_time_series.T, columns = column_names)
+    dev_array = pd.DataFrame(model_dev_time_series.T, columns = [f'modelled GDD before {phase}', f'modelled GDD at {phase}'] + ['year', 'Stations_id'])
+    comparison_array = ds[[f'observed time to {phase}', 'year', 'Stations_id']].merge(dev_array, how='left', on=['year', 'Stations_id']).dropna(how='all')
+    #comparison_array.loc[:, f'observed time to {phase}'] = comparison_array[f'observed time to {phase}'].dt.days
+    #comparison_array.loc[:, f'modelled GDD at {phase}'] = comparison_array[[f'modelled GDD at day {n}' for n in range(growing_period_length + 1)]].values[range(len(comparison_array)), comparison_array[f'observed time to {phase}'].values]
+    return comparison_array
+
+def run_GDD_transformed_space_error(x, ds, driver_variable, latlon_proj = True, 
+                                     response_type = 'Trapezoid', phase_list = ['beginning of flowering'], 
+                                     exclude_unfinished = False,
+                                     growing_period_length = 300, thresholds = [100], 
+                                     new_unfinished_penalisation=False):
+    comparison_array = run_GDD_transformed_space(x, ds, driver_variable, latlon_proj=latlon_proj,
+                               response_type=response_type, phase_list=phase_list,
+                                 growing_period_length=growing_period_length, thresholds=thresholds)
+    phase = phase_list[0]
+    return np.sqrt((((comparison_array[f'modelled GDD at {phase}'] - thresholds[0])**2) / comparison_array['observed time to beginning of flowering']).mean())
+
+def run_GDD_transformed_space_error2(x, ds, driver_variable, latlon_proj = True, 
+                                     response_type = 'Trapezoid', phase_list = ['beginning of flowering'], 
+                                     exclude_unfinished = False,
+                                     growing_period_length = 300, thresholds = [100], 
+                                     new_unfinished_penalisation=False):
+    comparison_array = run_GDD_transformed_space(x, ds, driver_variable, latlon_proj=latlon_proj,
+                               response_type=response_type, phase_list=phase_list,
+                                 growing_period_length=growing_period_length, thresholds=thresholds)
+    phase = phase_list[0]
+    log_likelihoods = (comparison_array[f'modelled GDD at {phase}'] - thresholds[0]) + 2 * np.log(1 + np.exp(-(comparison_array[f'modelled GDD at {phase}'] - thresholds[0])))
+    return log_likelihoods.mean()
 
 def Trapezoid_Temp_derivs(T, T_min, T_opt1, T_opt2, T_max):
     pre_opt = ((T>=T_min)*(T<=T_opt1))*np.array([(T - T_min)/(T_opt1 - T_min),
@@ -487,19 +568,21 @@ def run_GDD_and_get_RMSE_derivs(x, ds, driver_variable, latlon_proj = True, resp
          #(comparison_array['modelled time to yellow ripeness']/(1 + comparison_array[f'x{xindex} deriv for yellow ripeness']) - comparison_array['modelled time to yellow ripeness'])).sum() for xindex in range(len(x))
     ]
     return deriv_list#, resps_list#, comparison_array#, comparison_array, derivs_array, accumulated_deriv_time_series#, resps_list#, comparison_array, phase_dates_array, derivs_array, derivs_array2, derivs_array1
-
-def plot_profiles_at_minimum(x_opt, ds, lb=[0.05, 4, 20, 20, 35], ub = [1, 12, 33, 33, 60], 
+def plot_profiles_at_minimum(x_opt, ds, error_fctn = run_GDD_and_get_RMSE, 
+                             lb=[0.05, 4, 20, 20, 35], ub = [1, 12, 33, 33, 60], 
                              response_type = 'Trapezoid', phase_list = ['yellow ripeness'],
                              growing_period_length = 300, new_unfinished_penalisation=False,
-                             thresholds = [100], title = ''):
+                             thresholds = [100], title = '', plot_range = 0.5, bias_term=False):
     x_min = x_opt.copy()
     fig, axs = plt.subplots(1, len(x_min), figsize = (15, 4))
     if response_type == 'Trapezoid':
         parameter_names = ['Scale', 'T_min', 'T_opt1', 'T_opt2', 'T_max']
     elif response_type == 'Wang':
         parameter_names = ['Scale', 'T_min', 'T_opt', 'T_max']
+        if bias_term:
+            parameter_names.append('Bias term')
     elif response_type == 'Convolved':
-        parameter_names = ['Scale', 'T_min', 'T_opt', 'T_max', 'standard deviation', 'day-night gap']
+        parameter_names = ['Scale', 'T_min', 'T_opt', 'T_max']#, 'standard deviation', 'day-night gap']#
     for x_index in range(len(x_min)):
         parameter_name = parameter_names[x_index]
         print(f'Plotting {parameter_name}')
@@ -514,19 +597,21 @@ def plot_profiles_at_minimum(x_opt, ds, lb=[0.05, 4, 20, 20, 35], ub = [1, 12, 3
             #print(x_i[i])
             x_for_plotting = x_min.copy()
             x_for_plotting[x_index] = x_i[i]
-            RMSEs[i] = run_GDD_and_get_RMSE(x_for_plotting, ds, 't2m', response_type=response_type, phase_list = phase_list,
+            RMSEs[i] = error_fctn(x_for_plotting, ds, 't2m', response_type=response_type, phase_list = phase_list,
                                             growing_period_length = growing_period_length, new_unfinished_penalisation=new_unfinished_penalisation,
                                             thresholds = thresholds)
         axs[x_index].plot(x_i, RMSEs, label = 'Cost as parameter changes')
         axs[x_index].axvline(lb[x_index], linestyle = '--', color = 'red', label = 'bounds of optimisation')
         axs[x_index].axvline(ub[x_index], linestyle = '--', color = 'red')
-        #axs[x_index].axvline(x_min[x_index], color = 'green', label = 'Optimized value')
-        axs[x_index].scatter(x_min[x_index], 
-                             run_GDD_and_get_RMSE(x_min, ds, 't2m', response_type=response_type, phase_list = phase_list,
+        opt_value = error_fctn(x_min, ds, 't2m', response_type=response_type, phase_list = phase_list,
                                                   growing_period_length = growing_period_length, new_unfinished_penalisation=new_unfinished_penalisation,
-                                                  thresholds = thresholds),
-                            color = 'green', label = 'Optimized value')
+                                                  thresholds = thresholds)
+        #axs[x_index].axvline(x_min[x_index], color = 'green', label = 'Optimized value')
+        axs[x_index].scatter(x_min[x_index],
+                             opt_value,
+                             color = 'green', label = 'Optimized value')
         axs[x_index].set_xlim(x_i.min(), x_i.max())
+        axs[x_index].set_ylim(opt_value - plot_range, opt_value + plot_range)
         axs[x_index].set(xlabel = parameter_name)
         axs[x_index].set(ylabel = 'Cost')
         if x_index == 0:
@@ -607,73 +692,7 @@ def integrand(T, T_min, T_opt, T_max, d, s, gap):
     
 def expint(T_min, T_opt, T_max, d, s, gap):
     return quad(integrand, T_min, T_max, args=(T_min, T_opt, T_max, d, s, gap))[0]
-
-def run_GDD_and_get_RMSE(x, ds, driver_variable, latlon_proj = True, 
-                         response_type = 'Trapezoid', phase_list = ['beginning of flowering'], 
-                         new_unfinished_penalisation=False,
-                         growing_period_length = 300, thresholds = [100]):
-    if response_type == 'Trapezoid':
-        def response(meantemp):
-            return x[0]*modelling_fctns.Trapezoid_Temp_response(meantemp, x[1], x[2], x[3], x[4])
-    elif response_type == 'Wang':
-        def response(meantemp):
-            return x[0]*modelling_fctns.Wang_Engel_Temp_response(meantemp, x[1], x[2], x[3])
-    elif response_type == 'Convolved':
-        table = vec_expint(x[1], x[2], x[3], np.arange(0, 50, 0.5), 2.5, 5)#, x[4], x[5])#x[2]
-        def response(meantemp):
-            return x[0]*table[(np.round(meantemp/5, decimals = 1)*10).astype(int)]*(meantemp > 0)
-    elif response_type == 'Spline2':
-        spl = scipy.interpolate.BSpline(np.arange(0, 40, 4), np.array(x), 3)
-        def response(meantemp):
-            return np.maximum(spl(meantemp), 0)
-    elif response_type == 'Spline':
-        def B_0(u):
-            return ((1 - u**2)**2)*(u >= -1)*(u <= 1) #np.maximum((1/6)*(-(x**3) + 3*(x**2) - 3*x + 1), 0)
-        def response(meantemp):
-            resp = 0
-            for i, coeff in enumerate(x):
-                resp += coeff*B_0(0.25*(meantemp - i*2))
-            return np.maximum(resp, 0)
-    ## Initiate development time storage object - a list with a value for all the stations, that will change over time and be stored in a list.
-    t_dev = np.zeros(len(ds)) #Continuous development time. When this passes through some thresholds then have change in phase.
-    dev_time_series = [t_dev.copy()]
-    ## Make sure driver dataset uses station id to index this dimension
-    
-    #Run model
-    for day in range(growing_period_length):
-        # Pull values for temperature out of data frame
-        driver_values = ds[f'temperature at day {day}']
-        # Calculate the response for each of these temperatures and add it to the total accumulated temperature
-        t_dev += response(driver_values)#, t_dev)
-        #Store the accumulated temperature in an array
-        dev_time_series.append(t_dev.copy())
-
-    # Add the year and station codes for indexing later and to check that extracting values didn't mix up indexes
-    dev_time_series.append(ds['Referenzjahr'].values)
-    dev_time_series.append(ds['Stations_id'].values)
-    #print([p.shape for p in dev_time_series])
-    model_dev_time_series = np.array(dev_time_series)
-    #driver_array['Development Time'] = (('days from emergence', 'Emergence observation'), model_dev_time_series)
-    column_names = np.concatenate([np.array([f'modelled time to {phase}' for phase in phase_list]), ['Referenzjahr'], ['Stations_id']])
-    phase_dates_array = np.zeros((len(thresholds), model_dev_time_series.shape[1]))
-    for obs_index in range(model_dev_time_series.shape[1]):
-        phase_dates_array[:, obs_index] = np.digitize(thresholds, model_dev_time_series[:-2, obs_index].astype(np.float64))    
-    #print(phase_dates_array)
-    phase_dates_array = np.concatenate([phase_dates_array, [model_dev_time_series[-2]], [model_dev_time_series[-1]]], axis=0)
-    phase_dates_array = pd.DataFrame(phase_dates_array.T, columns = column_names)
-    comparison_array = ds.merge(phase_dates_array, how='left', on=['Referenzjahr', 'Stations_id']).dropna(how='all')
-    unfinished_penalty=0
-    if new_unfinished_penalisation:
-        unfinished_penalty = max((comparison_array[f'modelled time to {phase_list[0]}'] >growing_period_length - 3).sum() - 0.03*comparison_array.shape[0], 0)
-        comparison_array = comparison_array.where(comparison_array[f'modelled time to {phase_list[0]}'] < growing_period_length).dropna(how='all')
-    def RMSE(residuals):
-        if len(residuals) == 0:
-            return 0
-        else:
-            return np.sqrt(np.mean(residuals**2))
-    residuals = np.concatenate([(comparison_array[f'observed time to {phase}'].dt.days - comparison_array[f'modelled time to {phase}']).values for phase in phase_list])
-    return RMSE(residuals) + unfinished_penalty#, comparison_array
-
+vec_expint = np.vectorize(expint)
 def run_GDD_and_get_RMSE_derivs(x, ds, driver_variable, latlon_proj = True, response_type = 'Trapezoid', 
                                 phase_list = ['beginning of flowering'],growing_period_length = 300,
                                 thresholds = [100]):
@@ -779,3 +798,81 @@ def run_GDD_and_get_RMSE_derivs(x, ds, driver_variable, latlon_proj = True, resp
          #(comparison_array['modelled time to yellow ripeness']/(1 + comparison_array[f'x{xindex} deriv for yellow ripeness']) - comparison_array['modelled time to yellow ripeness'])).sum() for xindex in range(len(x))
     ]
     return deriv_list#, derivs_array#, resps_list#, comparison_array#, comparison_array, derivs_array, accumulated_deriv_time_series#, resps_list#, comparison_array, phase_dates_array, derivs_array, derivs_array2, derivs_array1
+
+def plot_from_comparison_array(comparison_array, title_extra='', method='scatter', savename = False, phase_list = ['beginning of flowering'], exclude_unfinished = False, growing_period_length = 300):
+    if method == 'both':
+        fig, axs = plt.subplots(len(phase_list), 2, figsize = (10, len(phase_list)*5))
+    else:
+        fig, axs = plt.subplots(1, len(phase_list), figsize = (len(phase_list)*5, 5))
+    for phase_index, phase in enumerate(phase_list):
+        number_unfinished = (comparison_array[f'modelled time to {phase}'] >= growing_period_length).sum()
+        number_total = len(comparison_array)
+        print(f'{number_unfinished} stations out of {number_total} did not reach the end of phase \'{phase}\'')
+        if exclude_unfinished:
+            comparison_array = comparison_array[comparison_array[f'modelled time to {phase}'] < growing_period_length].dropna()
+        #comparison_array[f'observed time to {phase}'] = comparison_array[f'observed time to {phase}'].dt.days
+        if len(phase_list) == 1:
+            ax = axs
+        else:
+            ax = axs[phase_index]
+        if method == 'regression':
+            #x_estimator=np.mean,
+            #minval = min(comparison_array[f'observed time to {phase}'].min(), comparison_array[f'modelled time to {phase}'].min()) - 1
+            #maxval = max(comparison_array[f'observed time to {phase}'].max(), comparison_array[f'modelled time to {phase}'].max()) + 1
+            minval = min(comparison_array[f'observed time to {phase}'].quantile(0.05), comparison_array[f'modelled time to {phase}'].quantile(0.05)) - 1
+            maxval = max(comparison_array[f'observed time to {phase}'].quantile(0.95), comparison_array[f'modelled time to {phase}'].quantile(0.95)) + 1
+            sns.regplot(x=f'modelled time to {phase}', y=f'observed time to {phase}', data=comparison_array, ax=axs,
+                        scatter_kws={'alpha':0.5, 's':4},  x_bins=np.arange(minval - 5, maxval + 5, 5))
+            axs.plot([minval, maxval], [minval, maxval], linestyle='--', color='k', lw=1, scalex=False, scaley=False)
+            axs.set_xlim(minval, maxval)
+            axs.set_ylim(minval, maxval)
+            axs.set_title(f'Comparison of modelled and observed time to {phase}\n{title_extra}')
+        elif method == 'errors':
+            comparison_array['error'] = comparison_array[f'observed time to {phase}'] - comparison_array[f'modelled time to {phase}']
+            sns.regplot(x=f'modelled time to {phase}', y='error', data=comparison_array, ax=axs,
+                        scatter_kws={'alpha':0.5, 's':4},  x_bins=np.arange(30, 200, 5))
+            axs.set_title(f'Comparison of fitted values and residuals {phase}\n{title_extra}')
+        elif method == 'histogram':
+            sns.histplot(x=f'modelled time to {phase}', data = comparison_array, ax=ax, label = 'modelled days to anthesis',
+                        stat = 'density')
+            sns.histplot(x=f'observed time to {phase}', data = comparison_array, ax=ax, label= 'observed days to anthesis',
+                        stat = 'density')
+            sns.set(font_scale=1.5)
+            axs.set_title(f'Comparison of GDD modelled and observed time to\n{phase} {title_extra}')
+            ax.set_xlabel('Days after planting')
+            #ax.plot([minval, maxval], [minval, maxval], linestyle = '--', color='k')
+            fig.legend(bbox_to_anchor = (1.2, 0.9))
+            rsquared = r2_score(comparison_array[f'observed time to {phase}'], comparison_array[f'modelled time to {phase}'])
+            print(f'R^2 value for model: {rsquared}')
+            bias = comparison_array[f'observed time to {phase}'].mean() - comparison_array[f'modelled time to {phase}'].mean()
+            variance_modelled = comparison_array[f'modelled time to {phase}'].var()
+            print(f'Bias: {bias**2}\nVariance of modelled values: {variance_modelled}')
+        elif method == 'both':
+            ax = axs[0]
+            minval = min(comparison_array[f'observed time to {phase}'].quantile(0.05), comparison_array[f'modelled time to {phase}'].quantile(0.05)) - 1
+            maxval = max(comparison_array[f'observed time to {phase}'].quantile(0.95), comparison_array[f'modelled time to {phase}'].quantile(0.95)) + 1
+            sns.regplot(x=f'modelled time to {phase}', y=f'observed time to {phase}', data=comparison_array, ax=ax,
+                        scatter_kws={'alpha':0.5, 's':4},  x_bins=np.arange(minval - 5, maxval + 5, 5))
+            ax.plot([minval, maxval], [minval, maxval], linestyle='--', color='k', lw=1, scalex=False, scaley=False)
+            ax.set_xlim(minval, maxval)
+            ax.set_ylim(minval, maxval)
+            
+            ax = axs[1]
+            sns.histplot(x=f'modelled time to {phase}', data = comparison_array, ax=ax, label = 'modelled days to anthesis',
+                        stat = 'density')
+            sns.histplot(x=f'observed time to {phase}', data = comparison_array, ax=ax, label= 'observed days to anthesis',
+                        stat = 'density')
+            sns.set(font_scale=1.5)
+            fig.suptitle(f'Comparison of GDD modelled and observed time to\n{phase} {title_extra}')
+            ax.set_xlabel('Days after planting', fontsize = 18)
+            ax.set_ylabel('Density', fontsize = 18)
+            #ax.plot([minval, maxval], [minval, maxval], linestyle = '--', color='k')
+            fig.legend(bbox_to_anchor = (1.2, 0.8))
+            fig.tight_layout()
+    rsquared = r2_score(comparison_array[f'observed time to {phase}'], comparison_array[f'modelled time to {phase}'])
+    print(f'R^2 value for model: {rsquared}')
+    bias = comparison_array[f'observed time to {phase}'].mean() - comparison_array[f'modelled time to {phase}'].mean()
+    variance_modelled = comparison_array[f'modelled time to {phase}'].var()
+    print(f'Bias: {bias**2} (sign {np.sign(bias)})\nVariance of modelled values: {variance_modelled}')
+    if savename != False:
+        fig.savefig(f'plots/{savename}', bbox_inches='tight')
