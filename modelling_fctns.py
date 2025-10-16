@@ -11,6 +11,16 @@ def phase_dependent_response(driver_values, t_dev, responses, thresholds):
         response += (phase == phase_index)*responses[phase_index](driver_values) #First brackets indicates if we are at the right phase, second takes the response function for each phase
     return response
 
+def phase_dependent_response2(driver_values, t_dev, responses, thresholds):
+    #Thresholds are the thresholds in development time where the different growth phases change
+    #Responses are the response functions, index starting at 'before the first threshold'
+    #driver values are the inputs to the response function
+    #t_dev is the (cts) development time
+    response = np.zeros(driver_values.shape)
+    for phase_index in range(len(responses)):
+        response += (t_dev <= thresholds[phase_index])*responses[phase_index](driver_values) #First brackets indicates if we are at the right phase, second takes the response function for each phase
+    return response
+
 def Wang_Engel_Temp_response(T, T_min, T_opt, T_max, beta = 1):
     alpha = np.log(2)/np.log( (T_max - T_min)/(T_opt - T_min) )
     f_T = ( ( (2*(np.sign(T - T_min)*(T - T_min))**alpha)*((T_opt - T_min)**alpha) - ((np.sign(T - T_min)*(T - T_min))**(2*alpha)) ) / ((T_opt - T_min)**(2*alpha)) )**beta
