@@ -572,7 +572,7 @@ def Wang_Temp_Derivs(T, T_min, T_opt, T_max):
     DfDT = np.nan_to_num(DfDT)
     return [DfDT[0], DfDT[1], DfDT[2]]
 
-def run_GDD_and_get_RMSE_derivs(x, ds, driver_variable, latlon_proj = True, response_type = 'Trapezoid', 
+def run_GDD_and_get_RMSE_derivs(x, ds, driver_variable = 't2m', latlon_proj = True, response_type = 'Trapezoid', 
                                 phase_list = ['beginning of flowering'],growing_period_length = 300,
                                 thresholds = [100]):
     only_phase = phase_list[0]
@@ -593,7 +593,7 @@ def run_GDD_and_get_RMSE_derivs(x, ds, driver_variable, latlon_proj = True, resp
     #Run model
     for day in range(growing_period_length):
         # Pull values for temperature out of data frame
-        driver_values = ds[f'temperature at day {day}'].values
+        driver_values = ds[f'{driver_variable} at day {day}'].values
         resp = response(driver_values)
         # Calculate the response for each of these temperatures and add it to the total accumulated temperature
         if response_type == 'Trapezoid':
@@ -658,6 +658,7 @@ def run_GDD_and_get_RMSE_derivs(x, ds, driver_variable, latlon_proj = True, resp
          #(comparison_array['modelled time to yellow ripeness']/(1 + comparison_array[f'x{xindex} deriv for yellow ripeness']) - comparison_array['modelled time to yellow ripeness'])).sum() for xindex in range(len(x))
     ]
     return deriv_list#, resps_list#, comparison_array#, comparison_array, derivs_array, accumulated_deriv_time_series#, resps_list#, comparison_array, phase_dates_array, derivs_array, derivs_array2, derivs_array1
+
 def plot_profiles_at_minimum(x_opt, ds, error_fctn = run_GDD_and_get_RMSE, 
                              lb=[0.05, 4, 20, 20, 35], ub = [1, 12, 33, 33, 60], 
                              response_type = 'Trapezoid', phase_list = ['yellow ripeness'],
