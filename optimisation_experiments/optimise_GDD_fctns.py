@@ -320,9 +320,9 @@ def put_ERA5_in_array(ds):
     ds['ERA5 clim'] = ERA5_clim.t2m.interp({'lat':lats_array, 'lon':lons_array}).values
     return ds
 
-def run_GDD(x, ds, driver_variable, latlon_proj = True, response_type = 'Trapezoid', 
+def stoch_GDD_simulation(x, ds, driver_variable = 'temperature', latlon_proj = True, response_type = 'Wang', scale_param = 1,
                              phase_list = ['beginning of flowering'], exclude_unfinished = False,
-                             growing_period_length = 300, thresholds = [100], 
+                             growing_period_length = 300, thresholds = [20], 
                              title_extra='', method='scatter', savename = False, plot=False):
     if response_type == 'Trapezoid':
         def response(meantemp):
@@ -333,13 +333,49 @@ def run_GDD(x, ds, driver_variable, latlon_proj = True, response_type = 'Trapezo
             #return x[0]*modelling_fctns.Wang_Engel_Temp_response(meantemp, x[1], x[2], x[3])
             return x[0]*modelling_fctns.Wang_Engel_Temp_response(meantemp, x[1], x[2], x[3])
     elif response_type == 'Convolved':
-        table = vec_expint(x[1], x[2], x[3], np.arange(0, 50, 0.5), 5, 3)#, x[4], x[5])#x[2]
+        table = vec_expint(x[1], x[2], x[3], np.arange(0, 50, 0.5), 2.5, 5)#, x[4], x[5])#x[2]
         def response(meantemp):
             return x[0]*table[(np.round(meantemp/5, decimals = 1)*10).astype(int)]*(meantemp > 0)
+    ds_for_model = ds.copy()
+    driver_columns = [f'{driver_variable} at day {day}' for day in range(growing_period_length)]
+    #ds_for_model.loc[:, driver_columns] = ds_for_model.loc[:, driver_columns]#.round(decimals = 10).astype(np.float64)
+    ds_for_model.loc[:, driver_columns] = response(ds_for_model[[f'{driver_variable} at day {day}' for day in range(growing_period_length)]]).cumsum(axis=1)
+    ds_for_model.loc[:, driver_columns] = 1 / (1 + np.exp( - scale_param * ( ds_for_model[driver_columns] - thresholds[0] ) ))
+    first_prob = ds_for_model[[f'{driver_variable} at day 0']]
+    ds_for_model.loc[:, driver_columns] = ds_for_model[driver_columns].diff(axis=1)#.fillna(ds_for_model[[f'{driver_variable} at day 0']])
+    ds_for_model.loc[:, f'{driver_variable} at day 0'] = first_prob
+    ds_for_model.loc[:, driver_columns] = ds_for_model.loc[:, driver_columns].apply(lambda x: x.div(x.sum()), axis = 1)
+    #ds_for_model.loc[:, driver_columns] = ds_for_model[driver_columns].div(ds_for_model[driver_columns].sum(axis=1), axis=0)
+    ds_for_model.loc[:, 'modelled time to flowering'] = ds_for_model.loc[:, driver_columns].apply(lambda x: np.random.choice(growing_period_length, p = x), axis = 1)
+    return ds_for_model
+
+def run_GDD(x, ds, driver_variable, latlon_proj = True, response_type = 'Trapezoid', 
+                             phase_list = ['beginning of flowering'], exclude_unfinished = False,
+                             growing_period_length = 300, thresholds = [100], 
+                             title_extra='', method='scatter', savename = False, plot=False, col='blue',
+                             step = 0.25):
+    if response_type == 'Trapezoid':
+        def response(meantemp):
+            #return x[0]*modelling_fctns.Wang_Engel_Temp_response(meantemp, x[1], x[2], x[3])
+            return x[0]*modelling_fctns.Trapezoid_Temp_response(meantemp, x[1], x[2], 0.2, 3)#x[3], x[4])
+    elif response_type == 'Wang':
+        def response(meantemp):
+            #return x[0]*modelling_fctns.Wang_Engel_Temp_response(meantemp, x[1], x[2], x[3])
+            return x[0]*modelling_fctns.Wang_Engel_Temp_response(meantemp, x[1], x[2], x[3])
+    elif response_type == 'Convolved':
+        #table = vec_expint(x[1], x[2], x[3], np.arange(0, 50, 0.5), 8, 3)#, x[4], x[5])#x[2]
+        table2 = Convolved_Wang_Engel(np.arange(-10, 50, step), x[1], x[2], x[3], 3)
+        table = scipy.ndimage.gaussian_filter(table2, 8/step, mode='constant', cval = 0, axes=0)
+        def response(meantemp):
+            return x[0]*table[(np.round(meantemp/step, decimals = 1)).astype(int) + int(10/step)]*(meantemp > -10)
     elif response_type == 'Convolved_vary_spread':
-        table = vec_expint(x[1], x[2], x[3], np.arange(0, 50, 0.5), x[4], x[5])#, x[4], x[5])#x[2]
+        #table = vec_expint(x[1], x[2], x[3], np.arange(0, 50, 0.5), x[4], x[5])#, x[4], x[5])#x[2]
+        table2 = Convolved_Wang_Engel(np.arange(-10, 50, step), x[1], x[2], x[3], x[5])
+        table = scipy.ndimage.gaussian_filter(table2, x[4]/step, mode='constant', cval = 0, axes=0)
         def response(meantemp):
-            return x[0]*table[(np.round(meantemp/5, decimals = 1)*10).astype(int)]*(meantemp > 0)
+            return x[0]*table[(np.round(meantemp/step, decimals = 1)).astype(int) + int(10/step)]*(meantemp > -10)
+        #def response(meantemp):
+        #    return x[0]*table[(np.round(meantemp/5, decimals = 1)*10).astype(int)]*(meantemp > 0)
     elif response_type == 'multi_phase':
         def response(meantemp):
             #return x[0]*modelling_fctns.Wang_Engel_Temp_response(meantemp, x[1], x[2], x[3])
@@ -373,39 +409,12 @@ def run_GDD(x, ds, driver_variable, latlon_proj = True, response_type = 'Trapezo
     phase_dates_array = np.concatenate([phase_dates_array, [model_dev_time_series[-2]], [model_dev_time_series[-1]]], axis=0)
     phase_dates_array = pd.DataFrame(phase_dates_array.T, columns = column_names)
     comparison_array = ds.merge(phase_dates_array, how='left', on=['year', 'Stations_id']).dropna(how='all')
+    #print(len(ds), len(comparison_array), len(phase_dates_array))
     if plot:
         plot_from_comparison_array(comparison_array, title_extra=title_extra, method=method, savename=savename, 
-                                  phase_list=phase_list, exclude_unfinished=exclude_unfinished, growing_period_length=growing_period_length)
+                                  phase_list=phase_list, exclude_unfinished=exclude_unfinished, growing_period_length=growing_period_length,
+                                  col=col)
     return comparison_array
-
-def stoch_GDD_simulation(x, ds, driver_variable = 'temperature', latlon_proj = True, response_type = 'Wang', scale_param = 1,
-                             phase_list = ['beginning of flowering'], exclude_unfinished = False,
-                             growing_period_length = 300, thresholds = [20], 
-                             title_extra='', method='scatter', savename = False, plot=False):
-    if response_type == 'Trapezoid':
-        def response(meantemp):
-            #return x[0]*modelling_fctns.Wang_Engel_Temp_response(meantemp, x[1], x[2], x[3])
-            return x[0]*modelling_fctns.Trapezoid_Temp_response(meantemp, x[1], x[2], 0.2, 3)#x[3], x[4])
-    elif response_type == 'Wang':
-        def response(meantemp):
-            #return x[0]*modelling_fctns.Wang_Engel_Temp_response(meantemp, x[1], x[2], x[3])
-            return x[0]*modelling_fctns.Wang_Engel_Temp_response(meantemp, x[1], x[2], x[3])
-    elif response_type == 'Convolved':
-        table = vec_expint(x[1], x[2], x[3], np.arange(0, 50, 0.5), 2.5, 5)#, x[4], x[5])#x[2]
-        def response(meantemp):
-            return x[0]*table[(np.round(meantemp/5, decimals = 1)*10).astype(int)]*(meantemp > 0)
-    ds_for_model = ds.copy()
-    driver_columns = [f'{driver_variable} at day {day}' for day in range(growing_period_length)]
-    #ds_for_model.loc[:, driver_columns] = ds_for_model.loc[:, driver_columns]#.round(decimals = 10).astype(np.float64)
-    ds_for_model.loc[:, driver_columns] = response(ds_for_model[[f'{driver_variable} at day {day}' for day in range(growing_period_length)]]).cumsum(axis=1)
-    ds_for_model.loc[:, driver_columns] = 1 / (1 + np.exp( - scale_param * ( ds_for_model[driver_columns] - thresholds[0] ) ))
-    first_prob = ds_for_model[[f'{driver_variable} at day 0']]
-    ds_for_model.loc[:, driver_columns] = ds_for_model[driver_columns].diff(axis=1)#.fillna(ds_for_model[[f'{driver_variable} at day 0']])
-    ds_for_model.loc[:, f'{driver_variable} at day 0'] = first_prob
-    ds_for_model.loc[:, driver_columns] = ds_for_model.loc[:, driver_columns].apply(lambda x: x.div(x.sum()), axis = 1)
-    #ds_for_model.loc[:, driver_columns] = ds_for_model[driver_columns].div(ds_for_model[driver_columns].sum(axis=1), axis=0)
-    ds_for_model.loc[:, 'modelled time to flowering'] = ds_for_model.loc[:, driver_columns].apply(lambda x: np.random.choice(growing_period_length, p = x), axis = 1)
-    return ds_for_model
 
 def run_GDD_and_get_RMSE(x, ds, driver_variable, latlon_proj = True, 
                          response_type = 'Trapezoid', phase_list = ['beginning of flowering'], 
@@ -426,6 +435,7 @@ def run_GDD_and_get_RMSE(x, ds, driver_variable, latlon_proj = True,
     phase = phase_list[0]
     residuals = (comparison_array[f'observed time to {phase}'] - comparison_array[f'modelled time to {phase}']).values # np.concatenate([(comparison_array[f'observed time to {phase}'].dt.days - comparison_array[f'modelled time to {phase}']).values for phase in phase_list])
     return RMSE(residuals) + unfinished_penalty#, comparison_array
+
 
 def run_GDD_and_get_RMSE_bias_term(x, ds, driver_variable, latlon_proj = True, 
                          response_type = 'Trapezoid', phase_list = ['beginning of flowering'], 
